@@ -27,7 +27,29 @@
             --color-button-shadow-blue: #5B81B3;
             --color-button-shadow-red: #D32F2F;
             --color-button-shadow-setting: #A0AEC0;
-        }
+        
+            /* New Cute Button Colors */
+            --color-btn-green: #95D674;
+            --color-shadow-green: #6FA850;
+
+            --color-btn-orange: #FFAB76;
+            --color-shadow-orange: #D68C5C;
+
+            --color-btn-blue: #76C5E8;
+            --color-shadow-blue: #5998B3;
+
+            --color-btn-yellow: #FFE082;
+            --color-shadow-yellow: #C9B060;
+
+            --color-btn-purple: #B39DDB;
+            --color-shadow-purple: #8371A3;
+
+            --color-btn-gray: #B0BEC5;
+            --color-shadow-gray: #7C8B91;
+
+            --color-btn-red: #EF5350;
+            --color-shadow-red: #B71C1C;
+}
 
         body {
             font-family: 'Inter', sans-serif;
@@ -174,7 +196,31 @@
         /* ========================================= */
         /* FIREBASE & CORE LOGIC (START) */
         /* ========================================= */
-    </style>
+    
+        /* Generic Cute Button Class */
+        .btn-cute {
+            background-color: var(--bg-color);
+            box-shadow: 0 4px 0 var(--shadow-color);
+            color: white;
+        }
+        .btn-cute:hover {
+            transform: translateY(2px);
+            box-shadow: 0 2px 0 var(--shadow-color);
+        }
+        .btn-cute:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+
+        /* Specific Color Classes */
+        .btn-green { --bg-color: var(--color-btn-green); --shadow-color: var(--color-shadow-green); }
+        .btn-orange { --bg-color: var(--color-btn-orange); --shadow-color: var(--color-shadow-orange); }
+        .btn-blue { --bg-color: var(--color-btn-blue); --shadow-color: var(--color-shadow-blue); }
+        .btn-yellow { --bg-color: var(--color-btn-yellow); --shadow-color: var(--color-shadow-yellow); color: #5D4037 !important; /* Darker text for yellow */ }
+        .btn-purple { --bg-color: var(--color-btn-purple); --shadow-color: var(--color-shadow-purple); }
+        .btn-gray { --bg-color: var(--color-btn-gray); --shadow-color: var(--color-shadow-gray); }
+        .btn-red { --bg-color: var(--color-btn-red); --shadow-color: var(--color-shadow-red); }
+</style>
     <!-- Firebase Imports --><script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -1241,44 +1287,63 @@
             <!-- Score Cards will be injected here by renderScores() -->
         </section>
 
-        <!-- Main Action Buttons --><div class="flex flex-wrap justify-center gap-4 mb-8">
-            <!-- UPDATED: Removed (3家付) from the button text -->
-            <button id="open-hu-split-selection" class="acnh-button green-main w-full sm:w-auto">
+        <!-- Main Action Buttons -->
+        <!-- Main Game Actions (Group 1) -->
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+            <!-- 自摸結算 (Green) -->
+            <button id="open-hu-split-selection" class="acnh-button btn-cute btn-green w-full">
                 <span class="text-xl mr-2">🎯</span> 自摸結算
             </button>
-            <button id="open-custom-round-modal" class="acnh-button red-gang w-full sm:w-auto">
-                <span class="text-xl mr-2">✏️</span> 自定義分數變動
+
+            <!-- 自定義分數變動 (Orange) -->
+            <button id="open-custom-round-modal" class="acnh-button btn-cute btn-orange w-full">
+                <span class="text-xl mr-2">✏️</span> 自定義分數
             </button>
-            <button id="open-setup-modal" class="acnh-button blue-main w-full sm:w-auto">
-                <span class="text-xl mr-2">👥</span> 設定島民名稱
+
+            <!-- 開槓 (Blue) -->
+            <button id="open-kai-gang-btn" class="acnh-button btn-cute btn-blue w-full">
+                <span class="text-xl mr-2">✨</span> 開槓
             </button>
-            <button id="open-settings-modal" class="acnh-button gray-main w-full sm:w-auto">
+
+            <!-- 明槓 (Yellow) -->
+            <button id="open-ming-gang-btn" class="acnh-button btn-cute btn-yellow w-full">
+                <span class="text-xl mr-2">⚪</span> 明槓
+            </button>
+
+            <!-- 暗槓 (Purple) -->
+            <button id="open-an-gang-btn" class="acnh-button btn-cute btn-purple w-full">
+                <span class="text-xl mr-2">⚫</span> 暗槓
+            </button>
+
+            <!-- 遊戲設定 (Gray) -->
+            <button id="open-settings-modal" class="acnh-button btn-cute btn-gray w-full">
                 <span class="text-xl mr-2">⚙️</span> 遊戲設定
             </button>
-             <button id="open-chart-modal-btn" class="acnh-button gray-main w-full sm:w-auto">
+        </div>
+
+        <!-- Divider -->
+        <div class="relative flex py-2 items-center mb-6">
+            <div class="flex-grow border-t-2 border-dashed" style="border-color: var(--color-earth-brown); opacity: 0.5;"></div>
+        </div>
+
+        <!-- System/Meta Actions (Group 2) -->
+        <div class="flex flex-wrap justify-center gap-4 mb-8">
+            <!-- 設定島民名稱 (Blue) -->
+            <button id="open-setup-modal" class="acnh-button btn-cute btn-blue w-full sm:w-auto">
+                <span class="text-xl mr-2">👥</span> 設定島民名稱
+            </button>
+
+            <!-- 顯示分數走勢圖 (Green) -->
+             <button id="open-chart-modal-btn" class="acnh-button btn-cute btn-green w-full sm:w-auto">
                 <span class="text-xl mr-2">📈</span> 顯示分數走勢圖
             </button>
-            <button id="reset-game-btn" class="acnh-button yellow w-full sm:w-auto">
+
+            <!-- 重設遊戲 (Red) -->
+            <button id="reset-game-btn" class="acnh-button btn-cute btn-red w-full sm:w-auto">
                 <span class="text-xl mr-2">🏝️</span> 重設遊戲
             </button>
         </div>
-        
-        <!-- Gang Quick Action Buttons -->
-        <div class="flex flex-wrap justify-center gap-3 mb-8 p-3 rounded-2xl border-2 border-red-300 bg-red-50">
-            <h2 class="w-full text-center text-lg font-bold text-red-600 mb-2">固定槓分操作 (設定值)</h2>
-            <button id="open-kai-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
-                <span class="text-xl mr-1">✨</span> 開槓 (1收1付)
-            </button>
-            <button id="open-ming-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
-                <span class="text-xl mr-1">⚪</span> 明槓 (1收3付)
-            </button>
-            <button id="open-an-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
-                <span class="text-xl mr-1">⚫</span> 暗槓 (1收3付)
-            </button>
-        </div>
-
-
-        <!-- History Section (Styled as a separate scrollable document) -->
+<!-- History Section (Styled as a separate scrollable document) -->
         <section class="bg-gray-100 p-6 rounded-3xl shadow-inner border border-gray-300">
             <h2 class="text-2xl font-bold mb-4 border-b pb-2 text-yellow-600" style="text-shadow: 1px 1px 0 #FFF;">資產轉移表 (最近 10 筆)</h2>
             <ul id="history-list">
