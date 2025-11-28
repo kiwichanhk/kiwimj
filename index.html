@@ -1,27 +1,169 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>麻雀計分器 - Mahjong Score Tracker</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Firebase Imports (已將版本恢復至 11.6.1，並新增 signInWithCustomToken 支援) -->
-    <script type="module">
+    <title>麻雀計分器 - 動森風格</title>
+    <!-- Tailwind CSS CDN --><script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* ========================================= */
+        /* ACNH STYLE VARIABLES & CORE STYLES */
+        /* ========================================= */
+        :root {
+            /* ACNH Color Palette */
+            --color-sky-blue: #BBE1F4; /* 背景天空/海洋 */
+            --color-grass-green: #97CE66; /* 主要行動 (綠色草地) */
+            --color-accent-yellow: #FAD36E; /* 亮黃色 (道具/重要訊息) */
+            --color-earth-brown: #C9A27F; /* 卡片邊框/木頭 */
+            --color-text-dark: #4A4A4A; /* 深色文字 */
+            --color-text-light: #6A6A6A; /* 淺色文字 */
+            --color-modal-bg: #FFFFFF; /* 模態框背景 */
+            --color-score-card: #FFF8E1; /* 分數卡片背景 (奶油色) */
+            --color-plus: #4CAF50; /* 加分綠 */
+            --color-minus: #F44336; /* 減分紅 */
+            --color-button-shadow-green: #7BAA4E;
+            --color-button-shadow-yellow: #D1A45D;
+            --color-button-shadow-blue: #5B81B3;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--color-sky-blue);
+            color: var(--color-text-dark);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px 10px;
+            touch-action: manipulation;
+        }
+
+        /* 主容器樣式 (島嶼告示板/卡片) */
+        .acnh-card {
+            background-color: white;
+            border-radius: 40px; /* 極度圓潤 */
+            padding: 2.5rem 2rem;
+            margin-top: 2rem;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 0 0 4px var(--color-earth-brown); /* 雙層陰影 */
+            max-width: 95%;
+            width: 700px;
+        }
+
+        /* 標題 (像島嶼名稱) */
+        h1 {
+            color: var(--color-grass-green);
+            font-weight: 800;
+            text-shadow: 2px 2px 0 #FFF; /* 白色描邊效果 */
+        }
+
+        /* 動物森友會風格按鈕 (圓邊且有浮凸感) */
+        .acnh-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.8rem 1.5rem;
+            min-width: 130px; /* 確保在移動端有足夠點擊區域 */
+            font-size: 1rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 9999px; /* 極圓邊 */
+            cursor: pointer;
+            transition: all 0.1s ease-out;
+            color: white;
+            text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.1);
+        }
+        
+        /* 基礎按鈕動畫 */
+        .acnh-button:hover {
+            filter: brightness(1.1);
+            transform: translateY(-2px);
+        }
+
+        .acnh-button:active {
+            transform: translateY(3px); /* 按下時向下移動 */
+            box-shadow: 0 2px 0 0 !important; /* 陰影變小 */
+        }
+        
+        .acnh-button:disabled {
+            filter: grayscale(0.8);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none !important;
+        }
+
+        /* 黃色按鈕 (Reset) */
+        .acnh-button.yellow {
+            background-color: var(--color-accent-yellow);
+            box-shadow: 0 5px 0 0 var(--color-button-shadow-yellow);
+        }
+        .acnh-button.yellow:hover {
+            box-shadow: 0 7px 0 0 var(--color-button-shadow-yellow);
+        }
+
+        /* 綠色按鈕 (Add Score) */
+        .acnh-button.green-main {
+            background-color: var(--color-grass-green);
+            box-shadow: 0 5px 0 0 var(--color-button-shadow-green);
+        }
+        .acnh-button.green-main:hover {
+            box-shadow: 0 7px 0 0 var(--color-button-shadow-green);
+        }
+        
+        /* 藍色按鈕 (Setup Names) */
+        .acnh-button.blue-main {
+            background-color: #79A3D3;
+            box-shadow: 0 5px 0 0 var(--color-button-shadow-blue);
+        }
+        .acnh-button.blue-main:hover {
+            box-shadow: 0 7px 0 0 var(--color-button-shadow-blue);
+        }
+
+        /* 分數卡片樣式 */
+        .score-card {
+            background-color: var(--color-score-card);
+            border-radius: 20px;
+            box-shadow: 0 4px 0 0 #D3C9AD; /* 淺棕色底部陰影 */
+            transition: transform 0.2s;
+        }
+        .score-card:hover {
+            transform: translateY(-2px);
+        }
+
+        /* 模態框樣式 */
+        .modal-content {
+            background-color: var(--color-modal-bg);
+            border-radius: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+        }
+
+        /* 消除 input 數字箭頭 */
+        .no-spinners::-webkit-outer-spin-button,
+        .no-spinners::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .no-spinners {
+            -moz-appearance: textfield;
+        }
+
+        /* ========================================= */
+        /* FIREBASE & CORE LOGIC (START) */
+        /* ========================================= */
+    </style>
+    <!-- Firebase Imports --><script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Set Firebase Log Level to Debug for development/debugging
+        // 設定 Firebase Log Level
         setLogLevel('Debug');
         
         // --- START: CONFIGURATION & ENVIRONMENT HANDLING ---
+        // 更新預設玩家名稱
+        const DEFAULT_PLAYER_NAMES = ['島民A', '島民B', '島民C', '島民D'];
         
-        // 預設玩家名稱配置
-        const DEFAULT_PLAYER_NAMES = ['A', 'B', 'C', 'D'];
-        
-        // 備用配置：當在 Canvas 環境外部執行時使用（例如：Wix/GitHub Pages）
         const CANVAS_FALLBACK_CONFIG = {
             apiKey: "AIzaSyAucSfEkaiVy4fo26owposx2WUGIDEkSPQ",
             authDomain: "kiwimj.firebaseapp.com",
@@ -32,7 +174,6 @@
             measurementId: "G-6HVF2N100E"
         };
 
-        // 優先使用 Canvas 環境提供的全域變數
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
             : CANVAS_FALLBACK_CONFIG;
@@ -46,7 +187,6 @@
         let userId = null;
 
         // --- Application State ---
-        // 使用預設名稱初始化玩家
         const createDefaultPlayers = () => DEFAULT_PLAYER_NAMES.map((name, index) => ({
             id: index,
             name: name,
@@ -54,7 +194,8 @@
         }));
         
         let players = createDefaultPlayers();
-        let gameHistory = []; // To store a record of all rounds
+        let gameHistory = [];
+        const STEP_VALUE = 1;
 
         // --- DOM Elements ---
         const scoreDisplay = document.getElementById('score-display');
@@ -62,15 +203,10 @@
         const roundTotalChange = document.getElementById('round-total-change');
         const historyList = document.getElementById('history-list');
         const userIdDisplay = document.getElementById('user-id-display');
-        const STEP_VALUE = 1; // Mahjong score step value (步長為 1)
-
+        
         // --- Core Utility Functions (Exposed to window for inline events) ---
 
-        /**
-         * Adjusts the score change input value for a specific player and recalculates total.
-         * @param {number} playerId - The ID of the player.
-         * @param {number} amount - The amount to add or subtract (e.g., 1 or -1).
-         */
+        /** 調整分數變動值並重新計算總和 */
         function adjustChange(playerId, amount) {
             const input = document.getElementById(`change-${playerId}`);
             if (input) {
@@ -81,9 +217,7 @@
             }
         }
 
-        /**
-         * Calculates the total score change for the current round inputs.
-         */
+        /** 計算回合總變動，並控制確認按鈕狀態 */
         function calculateRoundTotal() {
             let total = 0;
             players.forEach(player => {
@@ -94,20 +228,21 @@
             });
             roundTotalChange.textContent = `總變動: ${total}`;
             const confirmBtn = document.getElementById('confirm-round-btn');
+            
+            // ACNH Style color for text
             if (total === 0) {
-                roundTotalChange.classList.remove('text-red-400');
-                roundTotalChange.classList.add('text-green-400');
+                roundTotalChange.classList.remove('text-red-600');
+                roundTotalChange.classList.add('text-green-600');
                 confirmBtn.disabled = false;
-                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'acnh-button-disabled');
             } else {
-                roundTotalChange.classList.remove('text-green-400');
-                roundTotalChange.classList.add('text-red-400');
+                roundTotalChange.classList.remove('text-green-600');
+                roundTotalChange.classList.add('text-red-600');
                 confirmBtn.disabled = true;
-                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed', 'acnh-button-disabled');
             }
         }
 
-        // Expose functions to the global scope for use in generated HTML `onclick`
         window.adjustChange = adjustChange;
         window.calculateRoundTotal = calculateRoundTotal;
 
@@ -125,28 +260,25 @@
                 db = getFirestore(app);
                 auth = getAuth(app); 
 
-                // 執行身份驗證
                 try {
                     if (initialAuthToken) {
                         await signInWithCustomToken(auth, initialAuthToken);
                         console.log("Signed in with Custom Token.");
                     } else {
-                        // 當在 Canvas 環境外 (例如 GitHub Pages) 運行時使用 Fallback Configs
                         await signInAnonymously(auth);
                         console.log("Signed in Anonymously (using fallback config).");
                     }
                 } catch (e) {
                     console.error("Firebase Sign-In Failed:", e);
-                    // 當在 GitHub Pages 失敗時，會顯示此錯誤。
                     alertMessage('錯誤: 無法建立用戶會話。請檢查 Firebase 專案設定。', 'red');
                 }
 
-                // 設定 Auth 狀態監聽器
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         console.log("Authenticated user ID:", userId);
-                        userIdDisplay.textContent = `使用者 ID (共享鍵): ${userId}`;
+                        // ACNH Style text for ID
+                        userIdDisplay.innerHTML = `<span class="text-sm">我的島嶼號碼 (共享鍵): </span><span class="font-mono text-xs break-all">${userId}</span>`;
                         setupRealtimeListener();
                     } else {
                         console.log("User state changed to signed out.");
@@ -161,10 +293,8 @@
 
         // --- Firestore Operations ---
 
-        // Public path for the shared game data
         function getGameDocRef() {
             if (!db) return null;
-            // Public path: /artifacts/{appId}/public/data/mahjongScores/current_game
             return doc(db, 'artifacts', appId, 'public', 'data', 'mahjongScores', 'current_game');
         }
 
@@ -172,18 +302,14 @@
             const gameRef = getGameDocRef();
             if (!gameRef) return;
 
-            // Listen for real-time changes
             onSnapshot(gameRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    console.log("Data loaded from Firestore:", data);
-                    // Update state and UI
                     players = data.players || players;
                     gameHistory = data.history || gameHistory;
                     renderUI();
                 } else {
-                    console.log("No game data found. Initializing new game.");
-                    saveGameState(); // Save the initial state
+                    saveGameState();
                 }
             }, (error) => {
                 console.error("Firestore Listener Error:", error);
@@ -194,7 +320,6 @@
         async function saveGameState() {
             const gameRef = getGameDocRef();
             if (!gameRef || !userId) {
-                // 如果是登入失敗 (例如 auth/configuration-not-found)，則不顯示此錯誤
                 if (auth.currentUser) {
                     alertMessage('錯誤: 尚未完成身份驗證，無法儲存。', 'red');
                 }
@@ -205,12 +330,11 @@
                 players: players,
                 history: gameHistory,
                 lastUpdated: new Date().toISOString(),
-                ownerId: userId // Tracks who owns this state
+                ownerId: userId
             };
 
             try {
                 await setDoc(gameRef, stateToSave, { merge: true });
-                console.log("Game state saved successfully.");
             } catch (e) {
                 console.error("Error saving document: ", e);
                 alertMessage(`儲存失敗: ${e.message}`, 'red');
@@ -220,16 +344,16 @@
         // --- UI Rendering Functions ---
 
         function renderUI() {
-            renderScores();
-            renderHistory();
-            // renderPlayerSetupInputs is called when modal opens
+            if (scoreDisplay) renderScores();
+            if (historyList) renderHistory();
         }
 
         function renderScores() {
+            if (!scoreDisplay) return;
             scoreDisplay.innerHTML = players.map(player => `
-                <div class="p-4 bg-gray-700 rounded-xl shadow-lg flex justify-between items-center transition duration-300 transform hover:scale-[1.02]">
-                    <div class="text-lg font-semibold text-white">${player.name}</div>
-                    <div id="score-${player.id}" class="text-3xl font-bold ${player.score >= 0 ? 'text-green-400' : 'text-red-400'}">
+                <div class="score-card p-4 flex justify-between items-center transition duration-300">
+                    <div class="text-lg font-semibold text-var-text-dark">${player.name}</div>
+                    <div id="score-${player.id}" class="text-3xl font-bold" style="color: ${player.score >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
                         ${player.score}
                     </div>
                 </div>
@@ -239,75 +363,74 @@
         function renderPlayerSetupInputs() {
             const container = document.getElementById('setup-inputs-container');
             if (!container) return;
+            // Use ACNH style input fields
             container.innerHTML = players.map(player => `
                 <div class="mb-4">
-                    <label for="name-${player.id}" class="block text-sm font-medium text-gray-300">玩家 ${player.id + 1} 名稱</label>
+                    <label for="name-${player.id}" class="block text-sm font-medium text-var-text-light">島民 ${player.id + 1} 名稱</label>
                     <input type="text" id="name-${player.id}" value="${player.name}"
-                           class="mt-1 block w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                           class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg">
                 </div>
             `).join('');
         }
 
-        // MODIFIED: Use buttons for score adjustment
         function renderRoundInputs() {
-            const LOCAL_STEP = STEP_VALUE; // Use the constant step value (1)
+            const LOCAL_STEP = STEP_VALUE;
             roundInputsContainer.innerHTML = players.map(player => `
                 <div class="flex items-center space-x-2 mb-4">
-                    <label class="w-1/3 text-lg font-semibold text-gray-200">${player.name}</label>
-                    <div class="w-2/3 flex items-center bg-gray-800 border border-gray-600 rounded-xl overflow-hidden shadow-inner">
-                        <!-- Minus Button: Ensures a large, easily tappable target -->
-                        <button onclick="window.adjustChange(${player.id}, -${LOCAL_STEP})" 
+                    <label class="w-1/3 text-lg font-semibold text-var-text-dark">${player.name}</label>
+                    <div class="w-2/3 flex items-center bg-gray-100 border border-gray-300 rounded-lg overflow-hidden shadow-inner">
+                        <!-- Minus Button --><button onclick="window.adjustChange(${player.id}, -${LOCAL_STEP})" 
                                 type="button" 
-                                class="w-1/4 h-12 bg-red-600 hover:bg-red-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95] active:bg-red-800">
+                                class="w-1/4 h-12 bg-red-400 hover:bg-red-500 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
                             -
                         </button>
-                        <!-- Input Field to store/read value -->
-                        <input type="number" id="change-${player.id}" value="0" placeholder="± 變動"
-                               class="w-2/4 text-center px-2 py-1 bg-gray-800 text-white font-bold text-xl placeholder-gray-400 focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg text-center border-x border-gray-600 appearance-none [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none">
-                        <!-- Plus Button: Ensures a large, easily tappable target -->
-                        <button onclick="window.adjustChange(${player.id}, ${LOCAL_STEP})" 
+                        <!-- Input Field --><input type="number" id="change-${player.id}" value="0" placeholder="± 變動"
+                               class="w-2/4 text-center px-2 py-1 bg-gray-100 text-var-text-dark font-bold text-xl no-spinners focus:outline-none" style="border-left: 1px solid #ddd; border-right: 1px solid #ddd;">
+                        <!-- Plus Button --><button onclick="window.adjustChange(${player.id}, ${LOCAL_STEP})" 
                                 type="button" 
-                                class="w-1/4 h-12 bg-green-600 hover:bg-green-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95] active:bg-green-800">
+                                class="w-1/4 h-12 bg-green-400 hover:bg-green-500 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
                             +
                         </button>
                     </div>
                 </div>
             `).join('');
             
-            // Attach event listener for real-time sum calculation (in case user types manually)
             players.forEach(player => {
-                document.getElementById(`change-${player.id}`).addEventListener('input', calculateRoundTotal);
+                const inputEl = document.getElementById(`change-${player.id}`);
+                if (inputEl) {
+                    inputEl.addEventListener('input', calculateRoundTotal);
+                }
             });
-            calculateRoundTotal(); // Initial calculation
+            calculateRoundTotal();
         }
 
         function renderHistory() {
+            if (!historyList) return;
             historyList.innerHTML = '';
             if (gameHistory.length === 0) {
-                historyList.innerHTML = '<p class="text-gray-400 text-center py-4">尚無對局紀錄。</p>';
+                historyList.innerHTML = '<p class="text-center py-4" style="color: var(--color-text-light);">還沒有對局紀錄喔，快來玩吧！</p>';
                 return;
             }
 
-            // Display latest 10 rounds for brevity
             gameHistory.slice(0, 10).reverse().forEach((round, index) => {
                 const roundIndex = gameHistory.length - index;
-                // Add Chinese locale for date/time
                 const date = new Date(round.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 
                 const detail = round.changes.map(change => `
-                    <div class="flex justify-between text-sm py-1 border-b border-gray-600/50 last:border-b-0">
-                        <span class="text-gray-300">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
-                        <span class="${change.change >= 0 ? 'text-green-300' : 'text-red-300'} font-medium">
+                    <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
+                        <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                        <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
                             ${change.change > 0 ? '+' : ''}${change.change}
                         </span>
                     </div>
                 `).join('');
 
+                // ACNH Style history item
                 historyList.innerHTML += `
-                    <li class="bg-gray-700/50 p-3 rounded-lg mb-2 border-l-4 border-yellow-500 shadow-md">
+                    <li class="bg-gray-50 p-3 rounded-xl mb-3 border-l-4 border-yellow-500 shadow-sm">
                         <div class="flex justify-between items-center mb-1">
-                            <span class="text-sm font-bold text-yellow-300">第 ${roundIndex} 局</span>
-                            <span class="text-xs text-gray-400">${date}</span>
+                            <span class="text-sm font-bold text-yellow-600">${roundIndex} 局紀錄</span>
+                            <span class="text-xs" style="color: var(--color-text-light);">${date}</span>
                         </div>
                         <div class="mt-2 space-y-1">
                             ${detail}
@@ -321,8 +444,6 @@
 
         function applyRoundScores() {
             const changes = [];
-
-            // 1. Get changes and validate
             players.forEach(player => {
                 const input = document.getElementById(`change-${player.id}`);
                 const change = parseInt(input.value || 0, 10);
@@ -332,11 +453,10 @@
             const totalChange = changes.reduce((sum, item) => sum + item.change, 0);
 
             if (totalChange !== 0) {
-                alertMessage('錯誤: 積分總變動必須為零！請檢查輸入。', 'red');
+                alertMessage('錯誤: 積分總變動必須為零！', 'red');
                 return;
             }
 
-            // 2. Apply changes and create new state
             const newPlayers = players.map(player => {
                 const changeObj = changes.find(c => c.playerId === player.id);
                 return {
@@ -346,17 +466,15 @@
             });
             players = newPlayers;
 
-            // 3. Record history
             const roundRecord = {
                 timestamp: new Date().toISOString(),
                 changes: changes
             };
             gameHistory.push(roundRecord);
 
-            // 4. Save and close
             saveGameState();
             hideModal('round-modal');
-            alertMessage('積分已成功更新！', 'green');
+            alertMessage('積分已成功結算！', 'green');
         }
 
         function savePlayerNames() {
@@ -373,16 +491,12 @@
 
             if (namesChanged) {
                 saveGameState();
-                alertMessage('玩家名稱已儲存！', 'green');
+                alertMessage('島民名稱已儲存！', 'green');
             }
             hideModal('setup-modal');
         }
 
-        // --- RESET LOGIC (UPDATED to reset names to default) ---
-
-        // 1. Function to show the custom confirmation modal
         function resetGame() {
-            // Clear the input field when opening the modal
             const input = document.getElementById('reset-verification-input');
             if (input) {
                 input.value = '';
@@ -390,47 +504,48 @@
             showModal('reset-confirm-modal');
         }
 
-        // 2. Function to perform the actual reset action
         function performReset() {
             const verificationInput = document.getElementById('reset-verification-input');
             const requiredPhrase = "HELLO KIWI";
 
-            // Security check: Must match the required phrase exactly (after trimming whitespace)
             if (!verificationInput || verificationInput.value.trim() !== requiredPhrase) {
                 alertMessage(`安全驗證失敗：您必須輸入 "${requiredPhrase}" 才能重設遊戲。`, 'red');
-                verificationInput.value = ''; // Clear input on failure
+                verificationInput.value = '';
                 return;
             }
 
-            // Actual reset logic
-            players = createDefaultPlayers(); // IMPORTANT: Reset to default names and scores
+            players = createDefaultPlayers();
             gameHistory = [];
             saveGameState();
-            alertMessage('遊戲已重設 (名稱已重設為 A, B, C, D)。', 'green');
-            hideModal('reset-confirm-modal'); // Hide modal after action
+            alertMessage('島嶼已重啟！所有紀錄已清空。', 'green');
+            hideModal('reset-confirm-modal');
         }
         
         // --- Utility Functions (Modals & Alerts) ---
 
         function showModal(id) {
-            document.getElementById(id).classList.remove('hidden');
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.remove('hidden');
         }
 
         function hideModal(id) {
-            document.getElementById(id).classList.add('hidden');
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.add('hidden');
         }
 
         function alertMessage(message, type) {
             const container = document.getElementById('alert-container');
+            if (!container) return;
+            
+            // ACNH Style colors for alerts
             const colorClass = type === 'red' ? 'bg-red-500' : 'bg-green-500';
 
             const alertEl = document.createElement('div');
-            alertEl.className = `p-3 rounded-lg text-white font-medium ${colorClass} shadow-xl mb-2 transition-opacity duration-300`;
+            alertEl.className = `p-3 rounded-full text-white font-medium ${colorClass} shadow-xl mb-2 transition-opacity duration-300`;
             alertEl.textContent = message;
 
             container.appendChild(alertEl);
 
-            // Auto-hide after 3 seconds
             setTimeout(() => {
                 alertEl.classList.add('opacity-0');
                 alertEl.addEventListener('transitionend', () => alertEl.remove());
@@ -438,178 +553,154 @@
         }
 
         // --- Event Listeners and Initial Load ---
-        window.onload = initializeFirebase;
+        window.onload = () => {
+            initializeFirebase();
+        };
 
-        // Attach global listeners
         document.addEventListener('DOMContentLoaded', () => {
-            // Setup button listeners
-            document.getElementById('open-round-modal').addEventListener('click', () => {
+            const openRoundBtn = document.getElementById('open-round-modal');
+            const openSetupBtn = document.getElementById('open-setup-modal');
+            const confirmRoundBtn = document.getElementById('confirm-round-btn');
+            const saveNamesBtn = document.getElementById('save-names-btn');
+            const resetGameBtn = document.getElementById('reset-game-btn');
+            const confirmResetBtn = document.getElementById('confirm-reset-btn');
+            
+            if (openRoundBtn) openRoundBtn.addEventListener('click', () => {
                 renderRoundInputs();
                 showModal('round-modal');
             });
-            document.getElementById('open-setup-modal').addEventListener('click', () => {
+            
+            if (openSetupBtn) openSetupBtn.addEventListener('click', () => {
                 renderPlayerSetupInputs();
                 showModal('setup-modal');
             });
-            document.getElementById('confirm-round-btn').addEventListener('click', applyRoundScores);
-            document.getElementById('save-names-btn').addEventListener('click', savePlayerNames);
             
-            document.getElementById('reset-game-btn').addEventListener('click', resetGame); 
-            document.getElementById('confirm-reset-btn').addEventListener('click', performReset);
+            if (confirmRoundBtn) confirmRoundBtn.addEventListener('click', applyRoundScores);
+            if (saveNamesBtn) saveNamesBtn.addEventListener('click', savePlayerNames);
+            
+            if (resetGameBtn) resetGameBtn.addEventListener('click', resetGame); 
+            if (confirmResetBtn) confirmResetBtn.addEventListener('click', performReset);
 
-            // Close modal buttons
             document.querySelectorAll('.close-modal-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
-                    const modalId = e.target.closest('.modal')?.id; // Use optional chaining for safety
+                    const modalId = e.target.closest('.modal')?.id;
                     if (modalId) {
                        hideModal(modalId);
                     }
                 });
             });
 
-            // Initial UI rendering before Firestore data might arrive
             renderUI();
         });
 
     </script>
-    <style>
-        /* ADDED: Fixes the mobile double-tap zoom/page enlargement issue when tapping buttons */
-        body {
-            /* Prevents double-tap to zoom on touch devices */
-            touch-action: manipulation;
-        }
-        .modal-overlay {
-            background-color: rgba(0, 0, 0, 0.75);
-        }
-        .text-shadow {
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-        }
-        /* Custom style to hide number input arrows on mobile browsers */
-        .appearance-none {
-            -moz-appearance: textfield !important; /* Firefox */
-        }
-    </style>
 </head>
-<body class="bg-gray-900 min-h-screen p-4 sm:p-8 font-sans">
+<body class="min-h-screen">
+    
+    <!-- Global Alert Container --><div id="alert-container" class="fixed top-0 right-0 m-4 z-50 w-full max-w-sm">
+        <!-- Alerts will be injected here --></div>
 
-    <!-- Global Alert Container -->
-    <div id="alert-container" class="fixed top-0 right-0 m-4 z-50 w-full max-w-sm">
-        <!-- Alerts will be injected here -->
-    </div>
+    <div class="acnh-card max-w-4xl mx-auto relative z-10">
+        <!-- 1. 標題已更改為《集合啦！雀友交流會》 -->
+        <h1 class="text-4xl sm:text-5xl text-center mb-3">🀄 《集合啦！雀友交流會》 📝</h1>
+        
+        <!-- User ID: ACNH style display --><p id="user-id-display" class="text-center text-sm mb-6 p-2 rounded-xl border border-gray-300 bg-gray-50" style="color: var(--color-text-light);">我的島嶼號碼 (共享鍵): 載入中...</p>
 
-    <div class="max-w-4xl mx-auto">
-        <h1 class="text-4xl font-extrabold text-white text-center mb-6 text-shadow">麻雀計分儀 🀄</h1>
-        <!-- User ID: Uses break-words to handle long IDs on small screens -->
-        <p id="user-id-display" class="text-center text-sm text-gray-500 mb-6 break-words">使用者 ID (共享鍵): 載入中...</p>
-
-        <!-- Current Scores Display: Grid is responsive by default (2 columns across all devices) -->
-        <section id="score-display" class="grid grid-cols-2 gap-4 mb-8">
-            <!-- Player score cards injected here by renderScores() -->
+        <!-- Current Scores Display: Grid is responsive by default --><section id="score-display" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <!-- Score Cards will be injected here by renderScores() -->
         </section>
 
-        <!-- Actions: Stacks vertically on mobile (default flex-col) and rows on larger screens (sm:flex-row) -->
-        <section class="flex flex-col sm:flex-row gap-3 mb-8">
-            <button id="open-round-modal" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.01]">
-                新增一局積分 (新圈)
+        <!-- Action Buttons (ACNH Style, Circular and with shadow) --><div class="flex flex-wrap justify-center gap-4 mb-8">
+            <button id="open-round-modal" class="acnh-button green-main">
+                <span class="text-xl mr-2">💰</span> 新增一局積分
             </button>
-            <button id="open-setup-modal" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200">
-                設定玩家名稱
+            <button id="open-setup-modal" class="acnh-button blue-main">
+                <span class="text-xl mr-2">✏️</span> 設定島民名稱
             </button>
-            <button id="reset-game-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200">
-                重設遊戲
+            <button id="reset-game-btn" class="acnh-button yellow">
+                <span class="text-xl mr-2">🏝️</span> 重設遊戲
             </button>
-        </section>
+        </div>
 
-        <!-- History Section -->
-        <section class="mt-10">
-            <h2 class="text-2xl font-bold text-gray-200 mb-4 border-b border-gray-700 pb-2">最近對局紀錄 (最多 10 局)</h2>
-            <ul id="history-list" class="space-y-3">
-                <!-- History list injected here by renderHistory() -->
+        <!-- History Section (Styled as a separate scrollable document) -->
+        <section class="bg-gray-100 p-6 rounded-3xl shadow-inner border border-gray-300">
+            <!-- 2. 日誌標題已更改為資產轉移表 -->
+            <h2 class="text-2xl font-bold mb-4 border-b pb-2 text-yellow-600" style="text-shadow: 1px 1px 0 #FFF;">資產轉移表 (最近 10 筆)</h2>
+            <ul id="history-list">
+                <!-- History list items will be injected here by renderHistory() -->
             </ul>
         </section>
     </div>
-
-    <!-- 1. Player Setup Modal -->
-    <div id="setup-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
-        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
-        <div class="relative min-h-screen flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
-                <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-700 pb-3">設定玩家名稱</h3>
-                <div id="setup-inputs-container">
-                    <!-- Player name inputs injected here -->
+    
+    <!-- MODALS SECTION -->
+    
+    <!-- Round Score Modal -->
+    <div id="round-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-yellow-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-green-600">💸 結算本回合</h3>
+                <div id="round-inputs-container" class="space-y-4 mb-4">
+                    <!-- Dynamic player inputs injected -->
                 </div>
-                <div class="flex justify-end space-x-3 mt-6">
-                    <button class="close-modal-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
-                        取消
+                <div id="round-total-change" class="text-xl font-bold text-center mb-4 p-2 rounded-lg bg-gray-100">
+                    總變動: 0
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button id="confirm-round-btn" class="acnh-button green-main w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #4CAF50;">
+                        確認並結算
                     </button>
-                    <button id="save-names-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
-                        儲存名稱
+                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
+                        取消
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 2. Round Input Modal -->
-    <div id="round-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
-        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
-        <div class="relative min-h-screen flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
-                <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-700 pb-3">新增一局積分變動</h3>
-
-                <p class="text-sm text-gray-400 mb-4">請輸入每位玩家的積分變動 (正數為獲得，負數為支出)。**所有變動總和必須為零。** (點擊 ±1 調整)</p>
-
-                <div id="round-inputs-container">
-                    <!-- Score change inputs injected here -->
+    <!-- Player Setup Modal -->
+    <div id="setup-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-blue-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-blue-600">✏️ 島民更名服務</h3>
+                <div id="setup-inputs-container" class="space-y-4 mb-4">
+                    <!-- Dynamic name inputs injected -->
                 </div>
-
-                <div class="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
-                    <!-- Prominent total change for quick mobile verification -->
-                    <div id="round-total-change" class="text-xl font-bold text-red-400">總變動: 0</div>
-                    <button id="confirm-round-btn" disabled
-                            class="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition duration-150 opacity-50 cursor-not-allowed">
-                        確認並結算
+                <div class="flex justify-end space-x-3">
+                    <button id="save-names-btn" class="acnh-button blue-main w-full sm:w-auto">
+                        儲存名稱
                     </button>
-                </div>
-                <div class="text-center mt-4">
-                     <button class="close-modal-btn text-sm text-gray-400 hover:text-gray-200 transition duration-150">
-                        取消輸入
+                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
+                        取消
                     </button>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- 3. Reset Confirmation Modal -->
-    <div id="reset-confirm-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
-        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
-        <div class="relative min-h-screen flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
-                <h3 class="text-xl font-bold text-white mb-4 border-b border-gray-700 pb-3">確認重設遊戲</h3>
-                <p class="text-gray-300 mb-6">確定要重設所有積分和歷史記錄嗎？此操作不可撤銷。</p>
-                
-                <!-- NEW SECURITY VERIFICATION INPUT -->
-                <div class="mb-6">
-                    <label for="reset-verification-input" class="block text-sm font-medium text-red-400 mb-2">
-                        🚨 安全驗證：請輸入 `HELLO KIWI` 以確認重設
-                    </label>
-                    <input type="text" id="reset-verification-input" 
-                           placeholder="輸入 HELLO KIWI"
-                           class="mt-1 block w-full px-3 py-2 bg-gray-900 border border-red-500 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm">
-                </div>
-                <!-- END NEW SECURITY VERIFICATION INPUT -->
-
+    <!-- Reset Confirmation Modal -->
+    <div id="reset-confirm-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-red-500 transform transition-all">
+                <h3 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2 border-red-400">🚨 島嶼重啟警告</h3>
+                <p class="mb-4" style="color: var(--color-text-dark);">
+                    此操作將**清除所有積分和對局紀錄**，就像搬到一座新島嶼一樣。
+                </p>
+                <p class="mb-2 font-medium" style="color: var(--color-text-dark);">
+                    請輸入 <code class="text-red-500 font-bold">HELLO KIWI</code> 進行確認：
+                </p>
+                <input type="text" id="reset-verification-input"
+                       class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-red-400 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 sm:text-lg mb-6"
+                       placeholder="輸入 HELLO KIWI">
                 <div class="flex justify-end space-x-3">
-                    <button class="close-modal-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
-                        取消
+                    <button id="confirm-reset-btn" class="acnh-button yellow w-full sm:w-auto" style="background-color: #F44336; box-shadow: 0 4px 0 0 #D32F2F;">
+                        確認重啟
                     </button>
-                    <button id="confirm-reset-btn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
-                        確認重設
+                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
+                        取消
                     </button>
                 </div>
             </div>
         </div>
     </div>
-
 </body>
 </html>
