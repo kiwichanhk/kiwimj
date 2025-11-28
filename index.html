@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>麻雀計分器 - Mahjong Score Tracker</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Imports (已將版本恢復至 11.6.1，並新增 signInWithCustomToken 支援) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Set Firebase Log Level to Debug for development/debugging
+        setLogLevel('Debug');
+
+        // --- START: FIREBASE CONFIGURATION & ENVIRONMENT HANDLING ---
+        
+        // 備用配置：當在 Canvas 環境外部執行時使用（例如：Wix/GitHub Pages）
+        const CANVAS_FALLBACK_CONFIG = {
+            apiKey: "AIzaSyAucSfEkaiVy4fo26owposx2WUGIDEkSPQ",
+            authDomain: "kiwimj.firebaseapp.com",
+            projectId: "kiwimj",
+            storageBucket: "kiwimj.firebasestorage.app",
+            messagingSenderId: "909819524840",
+            appId: "1:909819524840:web:67cc2c9b7c03bb10827b5d",
+            measurementId: "G-6HVF2N100E"
+        };
+
+        // 優先使用 Canvas 環境提供的全域變數
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : CANVAS_FALLBACK_CONFIG;
+            
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // --- END: FIREBASE CONFIGURATION & ENVIRONMENT HANDLING ---
+
+        let db, auth;
+        let userId = null;
+
+        // --- Application State ---
+        let players = [
+            { id: 0, name: '玩家甲', score: 0 },
+            { id: 1, name: '玩家乙', score: 0 },
+            { id: 2, name: '玩家丙', score: 0 },
+            { id: 3, name: '玩家丁', score: 0 },
+        ];
+        let gameHistory = []; // To store a record of all rounds
+
+        // --- DOM Elements ---
+        const scoreDisplay = document.getElementById('score-display');
+        const setupModal = document.getElementById('setup-modal');
+        const roundModal = document.getElementById('round-modal');
+        const roundInputsContainer = document.getElementById('round-inputs-container');
+        const roundTotalChange = document.getElementById('round-total-change');
+        const historyList = document.getElementById('history-list');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const STEP_VALUE = 1; // Mahjong score step value (步長為 1)
+
+        // --- Core Utility Functions (Exposed to window for inline events) ---
+
+        /**
+         * Adjusts the score change input value for a specific player and recalculates total.
+         * @param {number} playerId - The ID of the player.
+         * @param {number} amount - The amount to add or subtract (e.g., 1 or -1).
+         */
+        function adjustChange(playerId, amount) {
+            const input = document.getElementById(`change-${playerId}`);
+            if (input) {
+                let currentValue = parseInt(input.value || 0, 10);
+                currentValue += amount;
+                input.value = currentValue;
+                calculateRoundTotal();
+            }
+        }
+
+        /**
+         * Calculates the total score change for the current round inputs.
+         * This function is also exposed to the window for direct calls from UI changes.
+         */
+        function calculateRoundTotal() {
+            let total = 0;
+            players.forEach(player => {
+                const input = document.getElementById(`change-${player.id}`);
+                if (input) {
+                    total += parseInt(input.value || 0, 10);
+                }
+            });
+            roundTotalChange.textContent = `總變動: ${total}`;
+            if (total === 0) {
+                roundTotalChange.classList.remove('text-red-400');
+                roundTotalChange.classList.add('text-green-400');
+                document.getElementById('confirm-round-btn').disabled = false;
+                document.getElementById('confirm-round-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                roundTotalChange.classList.remove('text-green-400');
+                roundTotalChange.classList.add('text-red-400');
+                document.getElementById('confirm-round-btn').disabled = true;
+                document.getElementById('confirm-round-btn').classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // Expose functions to the global scope for use in generated HTML `onclick`
+        window.adjustChange = adjustChange;
+        window.calculateRoundTotal = calculateRoundTotal;
+
+
+        // --- Initialization and Authentication ---
+
+        async function initializeFirebase() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase configuration is missing.");
+                    alertMessage('錯誤: 缺少 Firebase 配置。無法儲存資料。', 'red');
+                    return;
+                }
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app); // 確保在 app 初始化後立即獲取 auth 實例
+
+                // 執行身份驗證：優先使用環境提供的 Custom Token，否則使用匿名登入。
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Signed in with Custom Token.");
+                    } else {
+                        await signInAnonymously(auth);
+                        console.log("Signed in Anonymously (using fallback config).");
+                    }
+                } catch (e) {
+                    console.error("Firebase Sign-In Failed:", e);
+                    alertMessage('錯誤: 無法建立用戶會話。請檢查 Firebase 專案設定。', 'red');
+                }
+
+                // 設定 Auth 狀態監聽器
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Authenticated user ID:", userId);
+                        userIdDisplay.textContent = `使用者 ID (共享鍵): ${userId}`;
+                        setupRealtimeListener();
+                    } else {
+                        // 雖然我們已經在前面處理了登入，但保留此處用於監聽登出事件
+                        console.log("User state changed to signed out.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                alertMessage(`Firebase 初始化失敗: ${error.message}`, 'red');
+            }
+        }
+
+        // --- Firestore Operations ---
+
+        // Public path for the shared game data
+        function getGameDocRef() {
+            if (!db) return null;
+            // Public path: /artifacts/{appId}/public/data/mahjongScores/current_game
+            return doc(db, 'artifacts', appId, 'public', 'data', 'mahjongScores', 'current_game');
+        }
+
+        function setupRealtimeListener() {
+            const gameRef = getGameDocRef();
+            if (!gameRef) return;
+
+            // Listen for real-time changes
+            onSnapshot(gameRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    console.log("Data loaded from Firestore:", data);
+                    // Update state and UI
+                    players = data.players || players;
+                    gameHistory = data.history || gameHistory;
+                    renderUI();
+                } else {
+                    console.log("No game data found. Initializing new game.");
+                    saveGameState(); // Save the initial state
+                }
+            }, (error) => {
+                console.error("Firestore Listener Error:", error);
+                alertMessage(`數據同步失敗: ${error.message}`, 'red');
+            });
+        }
+
+        async function saveGameState() {
+            const gameRef = getGameDocRef();
+            if (!gameRef || !userId) {
+                alertMessage('錯誤: 尚未完成身份驗證，無法儲存。', 'red');
+                return;
+            }
+
+            const stateToSave = {
+                players: players,
+                history: gameHistory,
+                lastUpdated: new Date().toISOString(),
+                ownerId: userId // Tracks who owns this state
+            };
+
+            try {
+                await setDoc(gameRef, stateToSave, { merge: true });
+                console.log("Game state saved successfully.");
+            } catch (e) {
+                console.error("Error saving document: ", e);
+                alertMessage(`儲存失敗: ${e.message}`, 'red');
+            }
+        }
+
+        // --- UI Rendering Functions ---
+
+        function renderUI() {
+            renderScores();
+            renderHistory();
+            renderPlayerSetupInputs();
+        }
+
+        function renderScores() {
+            scoreDisplay.innerHTML = players.map(player => `
+                <div class="p-4 bg-gray-700 rounded-xl shadow-lg flex justify-between items-center transition duration-300 transform hover:scale-[1.02]">
+                    <div class="text-lg font-semibold text-white">${player.name}</div>
+                    <div id="score-${player.id}" class="text-3xl font-bold ${player.score >= 0 ? 'text-green-400' : 'text-red-400'}">
+                        ${player.score}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderPlayerSetupInputs() {
+            const container = document.getElementById('setup-inputs-container');
+            if (!container) return;
+            container.innerHTML = players.map(player => `
+                <div class="mb-4">
+                    <label for="name-${player.id}" class="block text-sm font-medium text-gray-300">玩家 ${player.id + 1} 名稱</label>
+                    <input type="text" id="name-${player.id}" value="${player.name}"
+                           class="mt-1 block w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+            `).join('');
+        }
+
+        // MODIFIED: Use buttons for score adjustment
+        function renderRoundInputs() {
+            const LOCAL_STEP = STEP_VALUE; // Use the constant step value (1)
+            roundInputsContainer.innerHTML = players.map(player => `
+                <div class="flex items-center space-x-2 mb-4">
+                    <label class="w-1/3 text-lg font-semibold text-gray-200">${player.name}</label>
+                    <div class="w-2/3 flex items-center bg-gray-800 border border-gray-600 rounded-xl overflow-hidden shadow-inner">
+                        <!-- Minus Button: Ensures a large, easily tappable target -->
+                        <button onclick="window.adjustChange(${player.id}, -${LOCAL_STEP})" 
+                                type="button" 
+                                class="w-1/4 h-12 bg-red-600 hover:bg-red-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
+                            -
+                        </button>
+                        <!-- Input Field to store/read value -->
+                        <input type="number" id="change-${player.id}" value="0" placeholder="± 變動"
+                               class="w-2/4 text-center px-2 py-1 bg-gray-800 text-white font-bold text-xl placeholder-gray-400 focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg text-center border-x border-gray-600 appearance-none [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none">
+                        <!-- Plus Button: Ensures a large, easily tappable target -->
+                        <button onclick="window.adjustChange(${player.id}, ${LOCAL_STEP})" 
+                                type="button" 
+                                class="w-1/4 h-12 bg-green-600 hover:bg-green-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
+                            +
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Attach event listener for real-time sum calculation (in case user types manually)
+            players.forEach(player => {
+                document.getElementById(`change-${player.id}`).addEventListener('input', calculateRoundTotal);
+            });
+            calculateRoundTotal(); // Initial calculation
+        }
+
+        function renderHistory() {
+            historyList.innerHTML = '';
+            if (gameHistory.length === 0) {
+                historyList.innerHTML = '<p class="text-gray-400 text-center py-4">尚無對局紀錄。</p>';
+                return;
+            }
+
+            // Display latest 10 rounds for brevity
+            gameHistory.slice(0, 10).reverse().forEach((round, index) => {
+                const roundIndex = gameHistory.length - index;
+                const date = new Date(round.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+
+                const detail = round.changes.map(change => `
+                    <div class="flex justify-between text-sm py-1 border-b border-gray-600/50 last:border-b-0">
+                        <span class="text-gray-300">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                        <span class="${change.change >= 0 ? 'text-green-300' : 'text-red-300'} font-medium">
+                            ${change.change > 0 ? '+' : ''}${change.change}
+                        </span>
+                    </div>
+                `).join('');
+
+                historyList.innerHTML += `
+                    <li class="bg-gray-700/50 p-3 rounded-lg mb-2 border-l-4 border-yellow-500 shadow-md">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-sm font-bold text-yellow-300">第 ${roundIndex} 局</span>
+                            <span class="text-xs text-gray-400">${date}</span>
+                        </div>
+                        <div class="mt-2 space-y-1">
+                            ${detail}
+                        </div>
+                    </li>
+                `;
+            });
+        }
+
+        // --- Core Logic Functions (excluding calculateRoundTotal, which is above) ---
+
+        function applyRoundScores() {
+            const changes = [];
+            let isValid = true;
+
+            // 1. Get changes and validate
+            players.forEach(player => {
+                const input = document.getElementById(`change-${player.id}`);
+                const change = parseInt(input.value || 0, 10);
+                changes.push({ playerId: player.id, change: change });
+            });
+
+            const totalChange = changes.reduce((sum, item) => sum + item.change, 0);
+
+            if (totalChange !== 0) {
+                alertMessage('錯誤: 積分總變動必須為零！請檢查輸入。', 'red');
+                return;
+            }
+
+            // 2. Apply changes and create new state
+            const newPlayers = players.map(player => {
+                const changeObj = changes.find(c => c.playerId === player.id);
+                return {
+                    ...player,
+                    score: player.score + changeObj.change
+                };
+            });
+            players = newPlayers;
+
+            // 3. Record history
+            const roundRecord = {
+                timestamp: new Date().toISOString(),
+                changes: changes
+            };
+            gameHistory.push(roundRecord);
+
+            // 4. Save and close
+            saveGameState();
+            hideModal('round-modal');
+            alertMessage('積分已成功更新！', 'green');
+        }
+
+        function savePlayerNames() {
+            let namesChanged = false;
+            const newPlayers = players.map(player => {
+                const input = document.getElementById(`name-${player.id}`);
+                const newName = input.value.trim() || `玩家 ${player.id + 1}`;
+                if (player.name !== newName) {
+                    namesChanged = true;
+                }
+                return { ...player, name: newName };
+            });
+            players = newPlayers;
+
+            if (namesChanged) {
+                saveGameState();
+                alertMessage('玩家名稱已儲存！', 'green');
+            }
+            hideModal('setup-modal');
+        }
+
+        // --- RESET LOGIC (UPDATED FOR SECURITY VERIFICATION) ---
+
+        // 1. Function to show the custom confirmation modal
+        function resetGame() {
+            // Clear the input field when opening the modal
+            const input = document.getElementById('reset-verification-input');
+            if (input) {
+                input.value = '';
+            }
+            showModal('reset-confirm-modal');
+        }
+
+        // 2. Function to perform the actual reset action
+        function performReset() {
+            const verificationInput = document.getElementById('reset-verification-input');
+            const requiredPhrase = "HELLO KIWI";
+
+            // Security check: Must match the required phrase exactly (after trimming whitespace)
+            if (!verificationInput || verificationInput.value.trim() !== requiredPhrase) {
+                alertMessage(`安全驗證失敗：您必須輸入 "${requiredPhrase}" 才能重設遊戲。`, 'red');
+                verificationInput.value = ''; // Clear input on failure
+                return;
+            }
+
+            // Actual reset logic
+            players = players.map(p => ({ ...p, score: 0 }));
+            gameHistory = [];
+            saveGameState();
+            alertMessage('遊戲已重設。', 'green');
+            hideModal('reset-confirm-modal'); // Hide modal after action
+        }
+        
+        // --- Utility Functions (Modals & Alerts) ---
+
+        function showModal(id) {
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+        function hideModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        function alertMessage(message, type) {
+            const container = document.getElementById('alert-container');
+            const colorClass = type === 'red' ? 'bg-red-500' : 'bg-green-500';
+
+            const alertEl = document.createElement('div');
+            alertEl.className = `p-3 rounded-lg text-white font-medium ${colorClass} shadow-xl mb-2 transition-opacity duration-300`;
+            alertEl.textContent = message;
+
+            container.appendChild(alertEl);
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                alertEl.classList.add('opacity-0');
+                alertEl.addEventListener('transitionend', () => alertEl.remove());
+            }, 3000);
+        }
+
+        // --- Event Listeners and Initial Load ---
+        window.onload = initializeFirebase;
+
+        // Attach global listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Setup button listeners
+            document.getElementById('open-round-modal').addEventListener('click', () => {
+                renderRoundInputs();
+                showModal('round-modal');
+            });
+            document.getElementById('open-setup-modal').addEventListener('click', () => {
+                renderPlayerSetupInputs();
+                showModal('setup-modal');
+            });
+            document.getElementById('confirm-round-btn').addEventListener('click', applyRoundScores);
+            document.getElementById('save-names-btn').addEventListener('click', savePlayerNames);
+            
+            document.getElementById('reset-game-btn').addEventListener('click', resetGame); 
+            document.getElementById('confirm-reset-btn').addEventListener('click', performReset);
+
+            // Close modal buttons
+            document.querySelectorAll('.close-modal-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const modalId = e.target.closest('.modal')?.id; // Use optional chaining for safety
+                    if (modalId) {
+                       hideModal(modalId);
+                    }
+                });
+            });
+
+            // Initial UI rendering before Firestore data might arrive
+            renderUI();
+        });
+
+    </script>
+    <style>
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.75);
+        }
+        .text-shadow {
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        /* Custom style to hide number input arrows on mobile browsers */
+        .appearance-none {
+            -moz-appearance: textfield !important; /* Firefox */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 min-h-screen p-4 sm:p-8 font-sans">
+
+    <!-- Global Alert Container -->
+    <div id="alert-container" class="fixed top-0 right-0 m-4 z-50 w-full max-w-sm">
+        <!-- Alerts will be injected here -->
+    </div>
+
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-4xl font-extrabold text-white text-center mb-6 text-shadow">麻雀計分儀 🀄</h1>
+        <!-- User ID: Uses break-words to handle long IDs on small screens -->
+        <p id="user-id-display" class="text-center text-sm text-gray-500 mb-6 break-words">使用者 ID (共享鍵): 載入中...</p>
+
+        <!-- Current Scores Display: Grid is responsive by default (2 columns across all devices) -->
+        <section id="score-display" class="grid grid-cols-2 gap-4 mb-8">
+            <!-- Player score cards injected here by renderScores() -->
+        </section>
+
+        <!-- Actions: Stacks vertically on mobile (default flex-col) and rows on larger screens (sm:flex-row) -->
+        <section class="flex flex-col sm:flex-row gap-3 mb-8">
+            <button id="open-round-modal" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.01]">
+                新增一局積分 (新圈)
+            </button>
+            <button id="open-setup-modal" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200">
+                設定玩家名稱
+            </button>
+            <button id="reset-game-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-200">
+                重設遊戲
+            </button>
+        </section>
+
+        <!-- History Section -->
+        <section class="mt-10">
+            <h2 class="text-2xl font-bold text-gray-200 mb-4 border-b border-gray-700 pb-2">最近對局紀錄 (最多 10 局)</h2>
+            <ul id="history-list" class="space-y-3">
+                <!-- History list injected here by renderHistory() -->
+            </ul>
+        </section>
+    </div>
+
+    <!-- 1. Player Setup Modal -->
+    <div id="setup-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
+        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
+        <div class="relative min-h-screen flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
+                <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-700 pb-3">設定玩家名稱</h3>
+                <div id="setup-inputs-container">
+                    <!-- Player name inputs injected here -->
+                </div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button class="close-modal-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
+                        取消
+                    </button>
+                    <button id="save-names-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
+                        儲存名稱
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Round Input Modal -->
+    <div id="round-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
+        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
+        <div class="relative min-h-screen flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
+                <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-700 pb-3">新增一局積分變動</h3>
+
+                <p class="text-sm text-gray-400 mb-4">請輸入每位玩家的積分變動 (正數為獲得，負數為支出)。**所有變動總和必須為零。** (點擊 ±1 調整)</p>
+
+                <div id="round-inputs-container">
+                    <!-- Score change inputs injected here -->
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
+                    <!-- Prominent total change for quick mobile verification -->
+                    <div id="round-total-change" class="text-xl font-bold text-red-400">總變動: 0</div>
+                    <button id="confirm-round-btn" disabled
+                            class="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition duration-150 opacity-50 cursor-not-allowed">
+                        確認並結算
+                    </button>
+                </div>
+                <div class="text-center mt-4">
+                     <button class="close-modal-btn text-sm text-gray-400 hover:text-gray-200 transition duration-150">
+                        取消輸入
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 3. Reset Confirmation Modal -->
+    <div id="reset-confirm-modal" class="modal fixed inset-0 z-50 hidden overflow-y-auto">
+        <div class="modal-overlay absolute w-full h-full bg-gray-900/80"></div>
+        <div class="relative min-h-screen flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all duration-300">
+                <h3 class="text-xl font-bold text-white mb-4 border-b border-gray-700 pb-3">確認重設遊戲</h3>
+                <p class="text-gray-300 mb-6">確定要重設所有積分和歷史記錄嗎？此操作不可撤銷。</p>
+                
+                <!-- NEW SECURITY VERIFICATION INPUT -->
+                <div class="mb-6">
+                    <label for="reset-verification-input" class="block text-sm font-medium text-red-400 mb-2">
+                        🚨 安全驗證：請輸入 `HELLO KIWI` 以確認重設
+                    </label>
+                    <input type="text" id="reset-verification-input" 
+                           placeholder="輸入 HELLO KIWI"
+                           class="mt-1 block w-full px-3 py-2 bg-gray-900 border border-red-500 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm">
+                </div>
+                <!-- END NEW SECURITY VERIFICATION INPUT -->
+
+                <div class="flex justify-end space-x-3">
+                    <button class="close-modal-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
+                        取消
+                    </button>
+                    <button id="confirm-reset-btn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
+                        確認重設
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
