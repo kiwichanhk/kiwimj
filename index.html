@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>麻雀計分器 - 動森風格</title>
     <!-- Tailwind CSS CDN --><script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN (for score trend chart) --><script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <style>
         /* ========================================= */
         /* ACNH STYLE VARIABLES & CORE STYLES */
@@ -24,6 +25,8 @@
             --color-button-shadow-green: #7BAA4E;
             --color-button-shadow-yellow: #D1A45D;
             --color-button-shadow-blue: #5B81B3;
+            --color-button-shadow-red: #D32F2F;
+            --color-button-shadow-setting: #A0AEC0;
         }
 
         body {
@@ -71,6 +74,7 @@
             transition: all 0.1s ease-out;
             color: white;
             text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.1);
+            white-space: nowrap; /* 防止按鈕文字換行 */
         }
         
         /* 基礎按鈕動畫 */
@@ -88,7 +92,8 @@
             filter: grayscale(0.8);
             cursor: not-allowed;
             transform: none;
-            box-shadow: none !important;
+            box-shadow: 0 5px 0 0 rgba(0, 0, 0, 0.1) !important;
+            background-color: #B0B0B0 !important;
         }
 
         /* 黃色按鈕 (Reset) */
@@ -118,6 +123,25 @@
             box-shadow: 0 7px 0 0 var(--color-button-shadow-blue);
         }
 
+        /* 灰色按鈕 (Settings/Cancel) */
+        .acnh-button.gray-main {
+            background-color: #A0AEC0;
+            box-shadow: 0 5px 0 0 #718096;
+        }
+        .acnh-button.gray-main:hover {
+            box-shadow: 0 7px 0 0 #718096;
+        }
+
+        /* 紅色按鈕 (Gang Actions) */
+        .acnh-button.red-gang {
+            background-color: #FF7043; /* 淺橙紅 */
+            box-shadow: 0 5px 0 0 #D84315;
+            min-width: 110px;
+        }
+        .acnh-button.red-gang:hover {
+            box-shadow: 0 7px 0 0 #D84315;
+        }
+        
         /* 分數卡片樣式 */
         .score-card {
             background-color: var(--color-score-card);
@@ -161,14 +185,13 @@
         setLogLevel('Debug');
         
         // --- START: CONFIGURATION & ENVIRONMENT HANDLING ---
-        // 更新預設玩家名稱
         const DEFAULT_PLAYER_NAMES = ['島民A', '島民B', '島民C', '島民D'];
         
         const CANVAS_FALLBACK_CONFIG = {
             apiKey: "AIzaSyAucSfEkaiVy4fo26owposx2WUGIDEkSPQ",
             authDomain: "kiwimj.firebaseapp.com",
             projectId: "kiwimj",
-            storageBucket: "kiwimj.firebasestorage.app",
+            storageBucket: "kiwimj.firebaseapp.com",
             messagingSenderId: "909819524840",
             appId: "1:909819524840:web:67cc2c9b7c03bb10827b5d",
             measurementId: "G-6HVF2N100E"
@@ -195,8 +218,33 @@
         
         let players = createDefaultPlayers();
         let gameHistory = [];
-        const STEP_VALUE = 1;
-
+        
+        // --- NEW: Chart Instance ---
+        let scoreChartInstance = null; // Global variable for Chart instance
+        
+        // --- NEW: Gang Score Multipliers ---
+        const GANG_MULTIPLIERS = {
+            kai: 6, // 開槓: 6 * step (1 pays 1)
+            ming: 6, // 明槓: 6 * step (3 pay 2 * step)
+            an: 12 // 暗槓: 12 * step (3 pay 4 * step)
+        };
+        
+        /** 根據步長計算預設的槓分 */
+        function getDefaultGangScores(step = 1) {
+            return {
+                stepValue: step,
+                mingGangTotal: GANG_MULTIPLIERS.ming * step,
+                anGangTotal: GANG_MULTIPLIERS.an * step,
+                kaiGangTotal: GANG_MULTIPLIERS.kai * step,
+            };
+        }
+        
+        // 設定狀態 (使用步長 1 的預設值初始化)
+        let settings = getDefaultGangScores(1);
+        
+        // 全域變數，用於儲存開槓流程中的收錢者 ID
+        let currentKaiGangReceiverId = null;
+        
         // --- DOM Elements ---
         const scoreDisplay = document.getElementById('score-display');
         const roundInputsContainer = document.getElementById('round-inputs-container');
@@ -217,7 +265,7 @@
             }
         }
 
-        /** 計算回合總變動，並控制確認按鈕狀態 */
+        /** 計算回合總變動，並控制確認按鈕狀態 (用於自定義結算) */
         function calculateRoundTotal() {
             let total = 0;
             players.forEach(player => {
@@ -226,7 +274,10 @@
                     total += parseInt(input.value || 0, 10);
                 }
             });
-            roundTotalChange.textContent = `總變動: ${total}`;
+            
+            // 更新總變動文字，提供上下文
+            roundTotalChange.textContent = `分數總變動: ${total}`;
+
             const confirmBtn = document.getElementById('confirm-round-btn');
             
             // ACNH Style color for text
@@ -242,9 +293,49 @@
                 confirmBtn.classList.add('opacity-50', 'cursor-not-allowed', 'acnh-button-disabled');
             }
         }
+        
+        /** 自摸結算 - 輸入分數時自動計算三家平均分配額 */
+        function calculateHuSplit(winnerId) {
+            const paymentInput = document.getElementById('hu-split-total');
+            const confirmBtn = document.getElementById('confirm-hu-split-btn');
+            const errorMsg = document.getElementById('hu-split-error');
+            
+            // IMPORTANT: 輸入值是每位輸家支付的分數 (X)
+            const paymentPerPlayer = parseInt(paymentInput.value || 0, 10);
+            
+            // 重置
+            errorMsg.classList.add('hidden');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            if (paymentPerPlayer <= 0 || isNaN(paymentPerPlayer)) {
+                errorMsg.textContent = '請輸入每位輸家支付的正數金額。';
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+            
+            // 贏家收到總額 (3 * X)
+            const winnerTotal = paymentPerPlayer * 3;
+            
+            const loserNames = players.filter(p => p.id !== winnerId).map(p => p.name).join('、');
+            
+            errorMsg.textContent = `結算預覽：贏家獲得 +${winnerTotal} 分。輸家 (${loserNames}) 每人支付 -${paymentPerPlayer} 分。總變動：0`;
+            errorMsg.classList.remove('text-red-600');
+            errorMsg.classList.add('text-green-600');
+            errorMsg.classList.remove('hidden');
+
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
 
         window.adjustChange = adjustChange;
         window.calculateRoundTotal = calculateRoundTotal;
+        window.calculateHuSplit = calculateHuSplit;
+        window.showModal = showModal;
+        window.hideModal = hideModal;
+        window.handleThreePayFixedTransaction = handleThreePayFixedTransaction;
+        window.openCustomRoundModal = openCustomRoundModal;
 
 
         // --- Initialization and Authentication ---
@@ -305,9 +396,25 @@
             onSnapshot(gameRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
+                    // Load state
                     players = data.players || players;
                     gameHistory = data.history || gameHistory;
+                    
+                    // NEW: Ensure settings defaults are applied if loaded data is partial
+                    const loadedSettings = data.settings || {};
+                    const currentStep = loadedSettings.stepValue || settings.stepValue; // Use existing step if not loaded
+                    settings = {
+                        ...getDefaultGangScores(currentStep), // Apply defaults for the current step
+                        ...loadedSettings, // Overwrite with loaded data
+                    };
+                    
                     renderUI();
+                    
+                    // Re-render round inputs to use new stepValue
+                    const roundModal = document.getElementById('custom-round-modal');
+                    if (roundModal && !roundModal.classList.contains('hidden')) {
+                         renderCustomRoundInputs();
+                    }
                 } else {
                     saveGameState();
                 }
@@ -329,6 +436,7 @@
             const stateToSave = {
                 players: players,
                 history: gameHistory,
+                settings: settings,
                 lastUpdated: new Date().toISOString(),
                 ownerId: userId
             };
@@ -346,6 +454,7 @@
         function renderUI() {
             if (scoreDisplay) renderScores();
             if (historyList) renderHistory();
+            renderSettingsInputs();
         }
 
         function renderScores() {
@@ -359,22 +468,41 @@
                 </div>
             `).join('');
         }
+        
+        function renderSettingsInputs() {
+            const unitSelect = document.getElementById('setting-step-value');
+            const mingGangInput = document.getElementById('setting-ming-gang');
+            const anGangInput = document.getElementById('setting-an-gang');
+            const kaiGangInput = document.getElementById('setting-kai-gang');
 
-        function renderPlayerSetupInputs() {
-            const container = document.getElementById('setup-inputs-container');
-            if (!container) return;
-            // Use ACNH style input fields
-            container.innerHTML = players.map(player => `
-                <div class="mb-4">
-                    <label for="name-${player.id}" class="block text-sm font-medium text-var-text-light">島民 ${player.id + 1} 名稱</label>
-                    <input type="text" id="name-${player.id}" value="${player.name}"
-                           class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg">
-                </div>
-            `).join('');
+            if (unitSelect) unitSelect.value = settings.stepValue;
+            if (mingGangInput) mingGangInput.value = settings.mingGangTotal;
+            if (anGangInput) anGangInput.value = settings.anGangTotal;
+            if (kaiGangInput) kaiGangInput.value = settings.kaiGangTotal;
+            
+            // --- NEW: Dynamic default update based on step value in modal ---
+            if (unitSelect && mingGangInput && anGangInput && kaiGangInput) {
+                // Remove previous listener to prevent duplication
+                unitSelect.onchange = null; 
+                
+                unitSelect.onchange = () => {
+                    const newStep = parseInt(unitSelect.value, 10);
+                    if (isNaN(newStep)) return;
+
+                    const defaults = getDefaultGangScores(newStep);
+
+                    // Update gang score inputs to the new defaults
+                    mingGangInput.value = defaults.mingGangTotal;
+                    anGangInput.value = defaults.anGangTotal;
+                    kaiGangInput.value = defaults.kaiGangTotal;
+                };
+            }
         }
 
-        function renderRoundInputs() {
-            const LOCAL_STEP = STEP_VALUE;
+        /** 渲染 自定義分數變動 模態框的輸入欄位 */
+        function renderCustomRoundInputs() {
+            const LOCAL_STEP = settings.stepValue || 1;
+            
             roundInputsContainer.innerHTML = players.map(player => `
                 <div class="flex items-center space-x-2 mb-4">
                     <label class="w-1/3 text-lg font-semibold text-var-text-dark">${player.name}</label>
@@ -404,6 +532,22 @@
             calculateRoundTotal();
         }
 
+        /** 渲染 3 家付帳的收錢者選擇按鈕 (通用於 明槓/暗槓) */
+        function renderThreePayActionButtons(type, scoreKey, gangTitle, icon) {
+            const container = document.getElementById('gang-action-buttons');
+            if (!container) return;
+            container.innerHTML = players.map(player => `
+                <button onclick="window.handleThreePayFixedTransaction('${type}', '${scoreKey}', ${player.id})" 
+                        class="acnh-button blue-main w-full py-2">
+                    ${icon} ${player.name} (收錢)
+                </button>
+            `).join('');
+            
+            document.getElementById('gang-action-title').textContent = `${gangTitle} - 誰收錢 (3 家付)？`;
+            showModal('gang-action-modal');
+        }
+
+
         function renderHistory() {
             if (!historyList) return;
             historyList.innerHTML = '';
@@ -416,20 +560,85 @@
                 const roundIndex = gameHistory.length - index;
                 const date = new Date(round.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 
-                const detail = round.changes.map(change => `
-                    <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
-                        <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
-                        <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
-                            ${change.change > 0 ? '+' : ''}${change.change}
-                        </span>
-                    </div>
-                `).join('');
+                let title;
+                let titleClass;
+                let detail;
+                
+                if (round.type === 'custom') {
+                    // 自定義分數變動
+                    const totalChange = round.changes.reduce((sum, c) => sum + c.change, 0);
+                    title = `✅ 複雜結算/自定義變動 (總額: ${totalChange})`;
+                    titleClass = 'text-yellow-600';
+                    detail = round.changes.map(change => `
+                        <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
+                            <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                            <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
+                                ${change.change > 0 ? '+' : ''}${change.change}
+                            </span>
+                        </div>
+                    `).join('');
+                } else if (round.type === 'hu-split') {
+                    // 自摸結算 (1 收 3 平均付)
+                    const winnerChange = round.changes.find(c => c.change > 0);
+                    const winnerName = players.find(p => p.id === winnerChange?.playerId)?.name || '未知贏家';
+                    const totalScore = round.totalScore; // 贏家總收 (3X)
+                    const payment = round.paymentPerPlayer; // 每家支付 (X)
+
+                    title = `🎯 ${winnerName} 自摸結算 (每家付 ${payment}，總收 ${totalScore})`;
+                    titleClass = 'text-green-600 font-extrabold';
+                    detail = round.changes.map(change => `
+                        <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
+                            <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                            <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
+                                ${change.change > 0 ? '+' : ''}${change.change}
+                            </span>
+                        </div>
+                    `).join('');
+                } else if (round.type === 'gang') {
+                    // 槓分結算
+                    const receiver = players.find(p => p.id === round.kongMakerId)?.name || '未知玩家';
+                    
+                    if (round.paymentType === '1pays3') {
+                        // Fixed Ming/An Gang (1 收 3 付)
+                        const totalScore = round.changes.find(c => c.change > 0).change;
+                        const scorePerPlayer = totalScore / 3;
+                        
+                        title = `${round.gangType} (${receiver} 收 ${totalScore}) 槓分`;
+                        detail = `<div class="text-sm text-gray-500 mb-1">其餘三家各付 ${scorePerPlayer} 分 (固定)</div>` + 
+                                 round.changes.map(change => `
+                            <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
+                                <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                            <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
+                                ${change.change > 0 ? '+' : ''}${change.change}
+                            </span>
+                        </div>
+                    `).join('');
+                        titleClass = 'text-red-500 font-extrabold';
+                        
+                    } else if (round.paymentType === '1pays1') {
+                         // Fixed Kai Gang (1 收 1 付)
+                         const payer = players.find(p => p.id === round.payerId)?.name || '未知玩家';
+                         const score = round.changes.find(c => c.change > 0).change;
+                         title = `${round.gangType} (${receiver} 收 ${score}) 槓分`;
+                         detail = `<div class="text-sm text-gray-500 mb-1">${payer} 單獨支付 ${score} 分 (固定)</div>` +
+                                  round.changes.map(change => `
+                            <div class="flex justify-between text-sm py-1 border-b border-gray-200 last:border-b-0">
+                                <span style="color: var(--color-text-light);">${players.find(p => p.id === change.playerId)?.name || '未知玩家'}</span>
+                                <span class="font-medium" style="color: ${change.change >= 0 ? 'var(--color-plus)' : 'var(--color-minus)'};">
+                                    ${change.change > 0 ? '+' : ''}${change.change}
+                                </span>
+                            </div>
+                        `).join('');
+                        titleClass = 'text-red-500 font-extrabold';
+                    }
+                }
+
 
                 // ACNH Style history item
                 historyList.innerHTML += `
                     <li class="bg-gray-50 p-3 rounded-xl mb-3 border-l-4 border-yellow-500 shadow-sm">
                         <div class="flex justify-between items-center mb-1">
-                            <span class="text-sm font-bold text-yellow-600">${roundIndex} 局紀錄</span>
+                            <span class="text-sm font-bold ${titleClass}">${title}</span>
                             <span class="text-xs" style="color: var(--color-text-light);">${date}</span>
                         </div>
                         <div class="mt-2 space-y-1">
@@ -439,10 +648,202 @@
                 `;
             });
         }
+        
+        // --- NEW: Chart Logic ---
 
+        /**
+         * 處理 gameHistory，計算每個玩家在每回合結束時的累積分數。
+         * @returns {object} 包含 labels (回合數) 和 datasets (玩家走勢) 的 Chart.js 數據結構。
+         */
+        function generateChartData() {
+            const playerScores = players.map(p => ({
+                id: p.id,
+                name: p.name,
+                scores: [0] // 從 0 分開始
+            }));
+
+            // 模擬分數變動
+            let currentScores = players.reduce((acc, p) => {
+                acc[p.id] = 0;
+                return acc;
+            }, {});
+
+            gameHistory.forEach((round, index) => {
+                // 確保每個玩家在回合中都有變動記錄，即使變動為 0
+                const roundChanges = players.map(p => {
+                    const changeObj = round.changes.find(c => c.playerId === p.id);
+                    return {
+                        playerId: p.id,
+                        change: changeObj ? changeObj.change : 0
+                    };
+                });
+                
+                roundChanges.forEach(change => {
+                    currentScores[change.playerId] += change.change;
+                });
+
+                playerScores.forEach(pScore => {
+                    pScore.scores.push(currentScores[pScore.id]);
+                });
+            });
+
+            // 產生標籤 (從 "開始" 到 "第 N 回合")
+            const labels = ["開始"].concat(gameHistory.map((_, index) => `第 ${index + 1} 回合`));
+
+            // 隨機顏色生成器 (使用四種顏色)
+            const colors = [
+                '#1f77b4', // Blue
+                '#ff7f0e', // Orange
+                '#2ca02c', // Green
+                '#d62728', // Red
+            ];
+
+            const datasets = playerScores.map((pScore, index) => ({
+                label: pScore.name,
+                data: pScore.scores,
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length] + '40', // Semi-transparent fill
+                tension: 0.2, // 曲線平滑度
+                fill: false, // 不填充區域
+                pointRadius: 5,
+                pointHoverRadius: 7
+            }));
+
+            return { labels, datasets };
+        }
+
+        /** 渲染 Chart.js 圖表 */
+        function renderScoreChart() {
+            const chartData = generateChartData();
+            const ctx = document.getElementById('score-chart');
+
+            if (!ctx) return;
+
+            if (scoreChartInstance) {
+                scoreChartInstance.destroy(); // 銷毀舊實例
+            }
+            
+            // ACNH style: simple, rounded lines
+            scoreChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '累積總分'
+                            }
+                        },
+                        x: {
+                            // --- START: 隱藏 X 軸標籤與標題 ---
+                            display: true, // 保持軸線顯示
+                            ticks: {
+                                display: false // 隱藏所有刻度標籤
+                            },
+                            title: {
+                                display: false // 隱藏 X 軸標題
+                            },
+                            grid: {
+                                drawOnChartArea: true, // 仍然顯示垂直網格線
+                            }
+                            // --- END: 隱藏 X 軸標籤與標題 ---
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    family: 'Inter, sans-serif'
+                                }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            bodyFont: {
+                                family: 'Inter, sans-serif'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
         // --- Core Logic Functions ---
+        
+        /** 處理 1 收 3 付 交易 (明槓/暗槓) - 僅用於固定分數 */
+        function handleThreePayFixedTransaction(type, scoreKey, receiverId) {
+            hideModal('gang-action-modal');
 
-        function applyRoundScores() {
+            const totalScore = settings[scoreKey];
+            const typeName = scoreKey === 'mingGangTotal' ? '明槓' : '暗槓';
+
+            if (!totalScore || totalScore <= 0) {
+                 alertMessage(`請先在設定中配置 ${typeName} 的總分數！`, 'red');
+                 return;
+            }
+            
+            if (totalScore % 3 !== 0) {
+                 alertMessage(`錯誤: ${typeName} 總分 (${totalScore}) 必須是 3 的倍數，才能平均分配給 3 位玩家！`, 'red');
+                 return;
+            }
+
+            const paymentPerPlayer = totalScore / 3;
+            const changes = [];
+            
+            const newPlayers = players.map(player => {
+                let change = 0;
+                if (player.id === receiverId) {
+                    // 收錢者
+                    change = totalScore;
+                } else {
+                    // 其他三家付錢
+                    change = -paymentPerPlayer;
+                }
+                
+                changes.push({ playerId: player.id, change: change });
+                
+                return {
+                    ...player,
+                    score: player.score + change
+                };
+            });
+            
+            players = newPlayers;
+
+            const roundRecord = {
+                type: type, // 'gang'
+                gangType: typeName,
+                paymentType: '1pays3',
+                kongMakerId: receiverId, 
+                timestamp: new Date().toISOString(),
+                changes: changes
+            };
+            gameHistory.push(roundRecord);
+
+            saveGameState();
+            alertMessage(`${players.find(p => p.id === receiverId).name} 成功執行 ${typeName}！`, 'green');
+        }
+        
+        /** 開啟自定義分數變動模態框 */
+        function openCustomRoundModal() {
+            // 每次開啟自定義模式，清除輸入欄位
+            players.forEach(player => {
+                const input = document.getElementById(`change-${player.id}`);
+                if (input) input.value = 0;
+            });
+            
+            renderCustomRoundInputs();
+            showModal('custom-round-modal');
+        }
+
+        /** 執行自定義分數變動結算 */
+        function applyCustomRoundScores() {
             const changes = [];
             players.forEach(player => {
                 const input = document.getElementById(`change-${player.id}`);
@@ -454,7 +855,7 @@
 
             if (totalChange !== 0) {
                 alertMessage('錯誤: 積分總變動必須為零！', 'red');
-                return;
+                return; 
             }
 
             const newPlayers = players.map(player => {
@@ -467,16 +868,114 @@
             players = newPlayers;
 
             const roundRecord = {
+                type: 'custom',
+                timestamp: new Date().toISOString(),
+                changes: changes
+            };
+            gameHistory.push(roundRecord);
+
+            // Reset inputs
+            players.forEach(player => {
+                const input = document.getElementById(`change-${player.id}`);
+                if (input) input.value = 0;
+            });
+
+            saveGameState();
+            hideModal('custom-round-modal');
+            alertMessage('自定義分數已成功結算！', 'green');
+        }
+        
+        // --- 自摸結算 (1 收 3 平均付) 邏輯 ---
+        
+        /** 自摸結算 Step 1: 選擇贏家 */
+        window.openHuSplitSelection = () => {
+            const container = document.getElementById('hu-split-buttons');
+            if (!container) return;
+            
+            container.innerHTML = players.map(player => `
+                <button onclick="window.openHuSplitInput(${player.id})" 
+                        class="acnh-button green-main w-full py-2">
+                    🎯 ${player.name} (自摸者)
+                </button>
+            `).join('');
+            
+            document.getElementById('hu-split-title').textContent = `🎯 自摸結算 - 誰自摸？`;
+            showModal('hu-split-selection-modal');
+        }
+        
+        /** 自摸結算 Step 2: 輸入分數並計算 */
+        window.openHuSplitInput = (winnerId) => {
+            hideModal('hu-split-selection-modal');
+            
+            const winnerName = players.find(p => p.id === winnerId)?.name || '未知玩家';
+            
+            document.getElementById('hu-split-input-title').textContent = `🎯 自摸結算 - ${winnerName} 每家收多少？`;
+            document.getElementById('hu-split-form').dataset.winnerId = winnerId;
+            
+            // 清除上次的輸入和訊息
+            document.getElementById('hu-split-total').value = '';
+            document.getElementById('hu-split-error').classList.add('hidden');
+            document.getElementById('confirm-hu-split-btn').disabled = true;
+            document.getElementById('confirm-hu-split-btn').classList.add('opacity-50', 'cursor-not-allowed');
+            
+            showModal('hu-split-input-modal');
+        }
+        
+        /** 執行自摸結算 */
+        window.applyHuSplitScores = (event) => {
+            event.preventDefault();
+            
+            const form = document.getElementById('hu-split-form');
+            const winnerId = parseInt(form.dataset.winnerId, 10);
+            // NOW the input is the payment per player (X)
+            const paymentPerPlayer = parseInt(document.getElementById('hu-split-total').value, 10);
+
+            if (paymentPerPlayer <= 0 || isNaN(paymentPerPlayer)) {
+                 alertMessage('錯誤: 每位玩家支付分數必須是正數！', 'red');
+                 return;
+            }
+            
+            // Winner receives 3 * X
+            const totalScoreReceived = paymentPerPlayer * 3; 
+            const changes = [];
+            
+            const newPlayers = players.map(player => {
+                let change = 0;
+                if (player.id === winnerId) {
+                    // 贏家收到總額
+                    change = totalScoreReceived;
+                } else {
+                    // 其他三家各付 X
+                    change = -paymentPerPlayer;
+                }
+                
+                changes.push({ playerId: player.id, change: change });
+                
+                return {
+                    ...player,
+                    score: player.score + change
+                };
+            });
+            
+            players = newPlayers;
+
+            const roundRecord = {
+                type: 'hu-split',
+                winnerId: winnerId,
+                paymentPerPlayer: paymentPerPlayer, // 記錄每家支付的分數 (X)
+                totalScore: totalScoreReceived, // 記錄贏家總收的分數 (3X)
                 timestamp: new Date().toISOString(),
                 changes: changes
             };
             gameHistory.push(roundRecord);
 
             saveGameState();
-            hideModal('round-modal');
-            alertMessage('積分已成功結算！', 'green');
+            hideModal('hu-split-input-modal');
+            alertMessage(`${players.find(p => p.id === winnerId).name} 自摸結算完成！每家收 +${paymentPerPlayer} 分。`, 'green');
         }
 
+        // --- 其他工具函數 (名稱設定、重設、槓分) 保持不變 ---
+        
         function savePlayerNames() {
             let namesChanged = false;
             const newPlayers = players.map(player => {
@@ -495,6 +994,37 @@
             }
             hideModal('setup-modal');
         }
+        
+        function saveSettings() {
+            const stepValue = parseInt(document.getElementById('setting-step-value').value, 10);
+            const mingGangTotal = parseInt(document.getElementById('setting-ming-gang').value, 10);
+            const anGangTotal = parseInt(document.getElementById('setting-an-gang').value, 10);
+            const kaiGangTotal = parseInt(document.getElementById('setting-kai-gang').value, 10);
+            
+            if (isNaN(stepValue) || isNaN(mingGangTotal) || isNaN(anGangTotal) || isNaN(kaiGangTotal)) {
+                alertMessage('錯誤: 設定值必須是數字！', 'red');
+                return;
+            }
+            
+            if (mingGangTotal % 3 !== 0 || anGangTotal % 3 !== 0) {
+                 alertMessage('錯誤: 明槓、暗槓總分必須是 3 的倍數，以確保三家付帳時能平均分配！', 'red');
+                 return;
+            }
+            
+            settings = {
+                stepValue: stepValue,
+                mingGangTotal: mingGangTotal,
+                anGangTotal: anGangTotal,
+                kaiGangTotal: kaiGangTotal,
+            };
+            
+            saveGameState();
+            renderCustomRoundInputs(); 
+            alertMessage('遊戲設定已儲存！', 'green');
+            hideModal('settings-modal');
+        }
+        window.saveSettings = saveSettings;
+
 
         function resetGame() {
             const input = document.getElementById('reset-verification-input');
@@ -516,6 +1046,8 @@
 
             players = createDefaultPlayers();
             gameHistory = [];
+            // 重設設定值，使用步長 1 的預設值
+            settings = getDefaultGangScores(1); 
             saveGameState();
             alertMessage('島嶼已重啟！所有紀錄已清空。', 'green');
             hideModal('reset-confirm-modal');
@@ -558,35 +1090,134 @@
         };
 
         document.addEventListener('DOMContentLoaded', () => {
-            const openRoundBtn = document.getElementById('open-round-modal');
+            const openHuSplitBtn = document.getElementById('open-hu-split-selection');
+            const openCustomRoundBtn = document.getElementById('open-custom-round-modal');
             const openSetupBtn = document.getElementById('open-setup-modal');
-            const confirmRoundBtn = document.getElementById('confirm-round-btn');
+            const openSettingsBtn = document.getElementById('open-settings-modal'); 
+            const confirmCustomRoundBtn = document.getElementById('confirm-round-btn');
             const saveNamesBtn = document.getElementById('save-names-btn');
             const resetGameBtn = document.getElementById('reset-game-btn');
             const confirmResetBtn = document.getElementById('confirm-reset-btn');
             
-            if (openRoundBtn) openRoundBtn.addEventListener('click', () => {
-                renderRoundInputs();
-                showModal('round-modal');
-            });
+            // NEW Chart Button
+            const openChartModalBtn = document.getElementById('open-chart-modal-btn');
+            
+            // Gang Action Buttons
+            const openMingGangBtn = document.getElementById('open-ming-gang-btn');
+            const openAnGangBtn = document.getElementById('open-an-gang-btn');
+            const openKaiGangBtn = document.getElementById('open-kai-gang-btn'); 
+            
+            // Add Hu Split Listener
+            if (openHuSplitBtn) openHuSplitBtn.addEventListener('click', window.openHuSplitSelection);
+            
+            // Use unified function for custom round
+            if (openCustomRoundBtn) openCustomRoundBtn.addEventListener('click', window.openCustomRoundModal);
             
             if (openSetupBtn) openSetupBtn.addEventListener('click', () => {
-                renderPlayerSetupInputs();
+                // Inline implementation for setup modal
+                const container = document.getElementById('setup-inputs-container');
+                if (!container) return;
+                container.innerHTML = players.map(player => `
+                    <div class="mb-4">
+                        <label for="name-${player.id}" class="block text-sm font-medium text-var-text-light">島民 ${player.id + 1} 名稱</label>
+                        <input type="text" id="name-${player.id}" value="${player.name}"
+                            class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg">
+                    </div>
+                `).join('');
                 showModal('setup-modal');
             });
             
-            if (confirmRoundBtn) confirmRoundBtn.addEventListener('click', applyRoundScores);
+            if (openSettingsBtn) openSettingsBtn.addEventListener('click', () => {
+                renderSettingsInputs();
+                showModal('settings-modal');
+            });
+            
+            // NEW Chart Button Listener
+            if (openChartModalBtn) {
+                openChartModalBtn.addEventListener('click', () => {
+                    showModal('chart-modal');
+                    // Delay rendering slightly to ensure modal is visible and canvas has dimensions
+                    setTimeout(renderScoreChart, 100); 
+                });
+            }
+            
+            if (confirmCustomRoundBtn) confirmCustomRoundBtn.addEventListener('click', applyCustomRoundScores);
             if (saveNamesBtn) saveNamesBtn.addEventListener('click', savePlayerNames);
             
             if (resetGameBtn) resetGameBtn.addEventListener('click', resetGame); 
             if (confirmResetBtn) confirmResetBtn.addEventListener('click', performReset);
-
+            
+            // Gang Modal Button Listeners
+            if (openMingGangBtn) openMingGangBtn.addEventListener('click', () => renderThreePayActionButtons('gang', 'mingGangTotal', '明槓', '⚪'));
+            if (openAnGangBtn) openAnGangBtn.addEventListener('click', () => renderThreePayActionButtons('gang', 'anGangTotal', '暗槓', '⚫'));
+            // Kai Gang is complex, using the previous 3-step approach
+            window.openKaiGangReceiverSelection = () => {
+                currentKaiGangReceiverId = null; // 重置狀態
+                const container = document.getElementById('gang-action-buttons');
+                if (!container) return;
+                
+                container.innerHTML = players.map(player => `
+                    <button onclick="window.handleKaiGangReceiverSelected(${player.id})" 
+                            class="acnh-button green-main w-full py-2">
+                        ✨ ${player.name} (收錢)
+                    </button>
+                `).join('');
+                
+                document.getElementById('gang-action-title').textContent = `開槓 (1 收 1 付) - 誰收錢？`;
+                showModal('gang-action-modal');
+            }
+            if (openKaiGangBtn) openKaiGangBtn.addEventListener('click', window.openKaiGangReceiverSelection); 
+            
+            // Simplified Kai Gang Logic (Kept outside for brevity)
+            window.handleKaiGangReceiverSelected = (receiverId) => {
+                currentKaiGangReceiverId = receiverId;
+                hideModal('gang-action-modal'); 
+                const receiverName = players.find(p => p.id === receiverId)?.name || '未知玩家';
+                document.getElementById('kai-gang-payer-title').textContent = `✨ 開槓 - 誰付錢給 ${receiverName}？`;
+                const container = document.getElementById('kai-gang-payer-buttons');
+                if (!container) return;
+                container.innerHTML = players.map(player => `
+                    <button onclick="window.handleKaiGangTransaction(${receiverId}, ${player.id})" 
+                            class="acnh-button red-gang w-full py-2 ${player.id === receiverId ? 'opacity-50 cursor-not-allowed' : ''}"
+                            ${player.id === receiverId ? 'disabled' : ''}>
+                        ${player.id === receiverId ? '🚫 ' : '💸 '} ${player.name} (付錢)
+                    </button>
+                `).join('');
+                showModal('kai-gang-payer-modal');
+            }
+            window.handleKaiGangTransaction = (receiverId, payerId) => {
+                hideModal('kai-gang-payer-modal');
+                currentKaiGangReceiverId = null;
+                const score = settings.kaiGangTotal;
+                if (!score || score <= 0) { alertMessage(`請先在設定中配置 開槓 的總分！`, 'red'); return; }
+                const changes = [];
+                const newPlayers = players.map(player => {
+                    let change = 0;
+                    if (player.id === receiverId) { change = score; } 
+                    else if (player.id === payerId) { change = -score; }
+                    changes.push({ playerId: player.id, change: change });
+                    return { ...player, score: player.score + change };
+                });
+                players = newPlayers;
+                const roundRecord = {
+                    type: 'gang',
+                    gangType: '開槓',
+                    paymentType: '1pays1',
+                    kongMakerId: receiverId, 
+                    payerId: payerId,
+                    timestamp: new Date().toISOString(),
+                    changes: changes
+                };
+                gameHistory.push(roundRecord);
+                saveGameState();
+                alertMessage(`${players.find(p => p.id === receiverId).name} 成功開槓！由 ${players.find(p => p.id === payerId).name} 支付 ${score} 分。`, 'green');
+            }
+            
+            // Close modal listeners
             document.querySelectorAll('.close-modal-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const modalId = e.target.closest('.modal')?.id;
-                    if (modalId) {
-                       hideModal(modalId);
-                    }
+                    if (modalId) hideModal(modalId);
                 });
             });
 
@@ -610,21 +1241,45 @@
             <!-- Score Cards will be injected here by renderScores() -->
         </section>
 
-        <!-- Action Buttons (ACNH Style, Circular and with shadow) --><div class="flex flex-wrap justify-center gap-4 mb-8">
-            <button id="open-round-modal" class="acnh-button green-main">
-                <span class="text-xl mr-2">💰</span> 新增一局積分
+        <!-- Main Action Buttons --><div class="flex flex-wrap justify-center gap-4 mb-8">
+            <!-- UPDATED: Removed (3家付) from the button text -->
+            <button id="open-hu-split-selection" class="acnh-button green-main w-full sm:w-auto">
+                <span class="text-xl mr-2">🎯</span> 自摸結算
             </button>
-            <button id="open-setup-modal" class="acnh-button blue-main">
-                <span class="text-xl mr-2">✏️</span> 設定島民名稱
+            <button id="open-custom-round-modal" class="acnh-button red-gang w-full sm:w-auto">
+                <span class="text-xl mr-2">✏️</span> 自定義分數變動
             </button>
-            <button id="reset-game-btn" class="acnh-button yellow">
+            <button id="open-setup-modal" class="acnh-button blue-main w-full sm:w-auto">
+                <span class="text-xl mr-2">👥</span> 設定島民名稱
+            </button>
+            <button id="open-settings-modal" class="acnh-button gray-main w-full sm:w-auto">
+                <span class="text-xl mr-2">⚙️</span> 遊戲設定
+            </button>
+             <button id="open-chart-modal-btn" class="acnh-button gray-main w-full sm:w-auto">
+                <span class="text-xl mr-2">📈</span> 顯示分數走勢圖
+            </button>
+            <button id="reset-game-btn" class="acnh-button yellow w-full sm:w-auto">
                 <span class="text-xl mr-2">🏝️</span> 重設遊戲
             </button>
         </div>
+        
+        <!-- Gang Quick Action Buttons -->
+        <div class="flex flex-wrap justify-center gap-3 mb-8 p-3 rounded-2xl border-2 border-red-300 bg-red-50">
+            <h2 class="w-full text-center text-lg font-bold text-red-600 mb-2">固定槓分操作 (設定值)</h2>
+            <button id="open-kai-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
+                <span class="text-xl mr-1">✨</span> 開槓 (1收1付)
+            </button>
+            <button id="open-ming-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
+                <span class="text-xl mr-1">⚪</span> 明槓 (1收3付)
+            </button>
+            <button id="open-an-gang-btn" class="acnh-button red-gang flex-grow sm:flex-grow-0">
+                <span class="text-xl mr-1">⚫</span> 暗槓 (1收3付)
+            </button>
+        </div>
+
 
         <!-- History Section (Styled as a separate scrollable document) -->
         <section class="bg-gray-100 p-6 rounded-3xl shadow-inner border border-gray-300">
-            <!-- 2. 日誌標題已更改為資產轉移表 -->
             <h2 class="text-2xl font-bold mb-4 border-b pb-2 text-yellow-600" style="text-shadow: 1px 1px 0 #FFF;">資產轉移表 (最近 10 筆)</h2>
             <ul id="history-list">
                 <!-- History list items will be injected here by renderHistory() -->
@@ -634,42 +1289,42 @@
     
     <!-- MODALS SECTION -->
     
-    <!-- Round Score Modal -->
-    <div id="round-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+    <!-- Score Chart Modal -->
+    <div id="chart-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
         <div class="flex items-center justify-center min-h-screen p-4">
-            <div class="modal-content w-full max-w-md border-4 border-yellow-500 transform transition-all">
-                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-green-600">💸 結算本回合</h3>
-                <div id="round-inputs-container" class="space-y-4 mb-4">
-                    <!-- Dynamic player inputs injected -->
+            <div class="modal-content w-full max-w-2xl border-4 border-blue-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-blue-600">📈 島民分數走勢圖</h3>
+                <div class="relative h-96">
+                    <canvas id="score-chart"></canvas>
                 </div>
-                <div id="round-total-change" class="text-xl font-bold text-center mb-4 p-2 rounded-lg bg-gray-100">
-                    總變動: 0
-                </div>
-                <div class="flex justify-end space-x-3">
-                    <button id="confirm-round-btn" class="acnh-button green-main w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #4CAF50;">
-                        確認並結算
-                    </button>
-                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
-                        取消
+                <!-- 更新提示文字 -->
+                <p class="text-sm text-gray-500 mt-4 text-center">X 軸為對局紀錄次數 (刻度已隱藏)，Y 軸為累積總分。</p>
+                <div class="flex justify-end mt-6">
+                    <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
+                        關閉
                     </button>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Player Setup Modal -->
-    <div id="setup-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+    
+    <!-- Custom Score Round Modal (Used for Zimo or Complex Custom Pao) -->
+    <div id="custom-round-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
         <div class="flex items-center justify-center min-h-screen p-4">
-            <div class="modal-content w-full max-w-md border-4 border-blue-500 transform transition-all">
-                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-blue-600">✏️ 島民更名服務</h3>
-                <div id="setup-inputs-container" class="space-y-4 mb-4">
-                    <!-- Dynamic name inputs injected -->
+            <div class="modal-content w-full max-w-md border-4 border-red-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-red-600">✏️ 自定義分數變動 (零和結算)</h3>
+                <p class="mb-4 text-sm text-gray-600">請輸入每位島民的實際變動分數 (贏家為正，輸家為負)。**總和必須為零**。</p>
+                <div id="round-inputs-container" class="space-y-4 mb-4">
+                    <!-- Dynamic player inputs injected -->
+                </div>
+                <div id="round-total-change" class="text-xl font-bold text-center mb-4 p-2 rounded-lg bg-gray-100">
+                    分數總變動: 0
                 </div>
                 <div class="flex justify-end space-x-3">
-                    <button id="save-names-btn" class="acnh-button blue-main w-full sm:w-auto">
-                        儲存名稱
+                    <button id="confirm-round-btn" class="acnh-button green-main w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #4CAF50;">
+                        確認並結算
                     </button>
-                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
+                    <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
                         取消
                     </button>
                 </div>
@@ -677,13 +1332,166 @@
         </div>
     </div>
     
-    <!-- Reset Confirmation Modal -->
+    <!-- Hu Split Selection Modal (Step 1: Choose Winner) -->
+    <div id="hu-split-selection-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-green-500 transform transition-all">
+                <h3 id="hu-split-title" class="text-2xl font-bold mb-4 border-b pb-2 text-green-600">🎯 自摸結算 - 誰自摸？</h3>
+                <p class="mb-4 text-sm text-gray-600">將使用 **1 收 3 付** 的方式結算，贏家分數 = 輸入分數 x 3。</p>
+                <div id="hu-split-buttons" class="space-y-3 mb-6">
+                    <!-- Dynamic player buttons injected -->
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="close-modal-btn acnh-button gray-main">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Hu Split Input Modal (Step 2: Input Score) -->
+    <div id="hu-split-input-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-green-500 transform transition-all">
+                <h3 id="hu-split-input-title" class="text-2xl font-bold mb-4 border-b pb-2 text-green-600">🎯 自摸結算 - 每家收多少？</h3>
+                <form id="hu-split-form" onsubmit="window.applyHuSplitScores(event)" data-winner-id="">
+                    <label for="hu-split-total" class="block text-lg font-medium text-var-text-dark mb-2">每位輸家支付的分數 (X)</label>
+                    <input type="number" id="hu-split-total" required min="1" step="1" oninput="window.calculateHuSplit(parseInt(document.getElementById('hu-split-form').dataset.winnerId))"
+                           class="mt-1 block w-full px-4 py-3 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark font-bold text-2xl no-spinners focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 mb-4"
+                           placeholder="例如: 10, 20, 30 (輸家各付)">
+                    
+                    <p id="hu-split-error" class="text-sm text-red-600 mb-4 hidden"></p>
+
+                    <div class="flex justify-end space-x-3">
+                        <button type="submit" id="confirm-hu-split-btn" class="acnh-button green-main w-full sm:w-auto" disabled>
+                            確認結算
+                        </button>
+                        <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
+                            取消
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Player Setup Modal (Kept for completeness) -->
+    <div id="setup-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-blue-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-blue-600">👥 島民更名服務</h3>
+                <div id="setup-inputs-container" class="space-y-4 mb-4">
+                    <!-- Dynamic name inputs injected -->
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button id="save-names-btn" class="acnh-button blue-main w-full sm:w-auto">
+                        儲存名稱
+                    </button>
+                    <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal (Kept for completeness) -->
+    <div id="settings-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-gray-500 transform transition-all">
+                <h3 class="text-2xl font-bold mb-4 border-b pb-2 text-gray-700">⚙️ 遊戲設定</h3>
+                
+                <div class="space-y-6">
+                    <!-- Unit Setting -->
+                    <div>
+                        <label for="setting-step-value" class="block text-lg font-medium text-var-text-dark mb-1">單位調整步長 (±按鈕)</label>
+                        <select id="setting-step-value" class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 sm:text-lg">
+                            <option value="1">1 (最小單位)</option>
+                            <option value="10">10 (方便快速調整)</option>
+                        </select>
+                    </div>
+
+                    <!-- Gang/Zimo Scores -->
+                    <h4 class="text-xl font-bold text-red-600 border-t pt-4">槓分設定 (輸入總額，非倍數)</h4>
+                    
+                    <div>
+                        <label for="setting-kai-gang" class="block text-base font-medium text-var-text-dark mb-1">✨ 開槓 (1 收 1 付) 總額</label>
+                        <input type="number" id="setting-kai-gang" min="1" step="1"
+                            class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 sm:text-lg no-spinners">
+                        <p class="text-sm text-gray-500 mt-1">開槓者收到的總分數。由單獨一位玩家支付此金額。</p>
+                    </div>
+                    
+                    <div>
+                        <label for="setting-ming-gang" class="block text-base font-medium text-var-text-dark mb-1">⚪ 明槓 (1 收 3 付) 總額</label>
+                        <input type="number" id="setting-ming-gang" min="3" step="3"
+                            class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 sm:text-lg no-spinners">
+                        <p class="text-sm text-gray-500 mt-1">明槓者收到的總分數。由其餘三家平均支付此金額 (必須是 3 的倍數)。</p>
+                    </div>
+
+                    <div>
+                        <label for="setting-an-gang" class="block text-base font-medium text-var-text-dark mb-1">⚫ 暗槓 (1 收 3 付) 總額</label>
+                        <input type="number" id="setting-an-gang" min="3" step="3"
+                            class="mt-1 block w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg text-var-text-dark focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 sm:text-lg no-spinners">
+                        <p class="text-sm text-gray-500 mt-1">暗槓者收到的總分數。由其餘三家平均支付此金額 (必須是 3 的倍數)。</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button onclick="window.saveSettings()" class="acnh-button blue-main w-full sm:w-auto">
+                        儲存設定
+                    </button>
+                    <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gang Action Modal (Receiver Selection - Used for Fixed Ming/An Gang) -->
+    <div id="gang-action-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-red-500 transform transition-all">
+                <h3 id="gang-action-title" class="text-2xl font-bold mb-4 border-b pb-2 text-red-600">槓分結算 - 誰收錢？</h3>
+                <p class="mb-4 text-sm text-gray-600">選擇哪位島民是開槓的贏家（分數已在設定中預設）。</p>
+                <div id="gang-action-buttons" class="space-y-3 mb-6">
+                    <!-- Dynamic player buttons injected -->
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="close-modal-btn acnh-button gray-main">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Kai Gang Payer Selection Modal (Used for Kai Gang Step 2) -->
+    <div id="kai-gang-payer-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="modal-content w-full max-w-md border-4 border-red-500 transform transition-all">
+                <h3 id="kai-gang-payer-title" class="text-2xl font-bold mb-4 border-b pb-2 text-red-600">✨ 開槓 - 誰付錢？</h3>
+                <p class="mb-4 text-sm text-gray-600">選擇由哪一位島民單獨支付槓分給收錢者。</p>
+                <div id="kai-gang-payer-buttons" class="space-y-3 mb-6">
+                    <!-- Dynamic player buttons injected -->
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="close-modal-btn acnh-button gray-main">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Confirmation Modal (Kept for completeness) -->
     <div id="reset-confirm-modal" class="modal hidden fixed inset-0 z-[60] overflow-y-auto" style="background-color: rgba(0, 0, 0, 0.4);">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="modal-content w-full max-w-md border-4 border-red-500 transform transition-all">
                 <h3 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2 border-red-400">🚨 島嶼重啟警告</h3>
                 <p class="mb-4" style="color: var(--color-text-dark);">
-                    此操作將**清除所有積分和對局紀錄**，就像搬到一座新島嶼一樣。
+                    此操作將**清除所有積分、槓分和對局紀錄**，就像搬到一座新島嶼一樣。
                 </p>
                 <p class="mb-2 font-medium" style="color: var(--color-text-dark);">
                     請輸入 <code class="text-red-500 font-bold">HELLO KIWI</code> 進行確認：
@@ -695,7 +1503,7 @@
                     <button id="confirm-reset-btn" class="acnh-button yellow w-full sm:w-auto" style="background-color: #F44336; box-shadow: 0 4px 0 0 #D32F2F;">
                         確認重啟
                     </button>
-                    <button type="button" class="close-modal-btn acnh-button bg-gray-400 hover:bg-gray-500 w-full sm:w-auto" style="box-shadow: 0 4px 0 0 #A0AEC0;">
+                    <button type="button" class="close-modal-btn acnh-button gray-main w-full sm:w-auto">
                         取消
                     </button>
                 </div>
