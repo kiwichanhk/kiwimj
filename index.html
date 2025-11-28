@@ -15,8 +15,11 @@
 
         // Set Firebase Log Level to Debug for development/debugging
         setLogLevel('Debug');
-
-        // --- START: FIREBASE CONFIGURATION & ENVIRONMENT HANDLING ---
+        
+        // --- START: CONFIGURATION & ENVIRONMENT HANDLING ---
+        
+        // 預設玩家名稱配置
+        const DEFAULT_PLAYER_NAMES = ['A', 'B', 'C', 'D'];
         
         // 備用配置：當在 Canvas 環境外部執行時使用（例如：Wix/GitHub Pages）
         const CANVAS_FALLBACK_CONFIG = {
@@ -37,24 +40,24 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // --- END: FIREBASE CONFIGURATION & ENVIRONMENT HANDLING ---
+        // --- END: CONFIGURATION & ENVIRONMENT HANDLING ---
 
         let db, auth;
         let userId = null;
 
         // --- Application State ---
-        let players = [
-            { id: 0, name: '玩家甲', score: 0 },
-            { id: 1, name: '玩家乙', score: 0 },
-            { id: 2, name: '玩家丙', score: 0 },
-            { id: 3, name: '玩家丁', score: 0 },
-        ];
+        // 使用預設名稱初始化玩家
+        const createDefaultPlayers = () => DEFAULT_PLAYER_NAMES.map((name, index) => ({
+            id: index,
+            name: name,
+            score: 0
+        }));
+        
+        let players = createDefaultPlayers();
         let gameHistory = []; // To store a record of all rounds
 
         // --- DOM Elements ---
         const scoreDisplay = document.getElementById('score-display');
-        const setupModal = document.getElementById('setup-modal');
-        const roundModal = document.getElementById('round-modal');
         const roundInputsContainer = document.getElementById('round-inputs-container');
         const roundTotalChange = document.getElementById('round-total-change');
         const historyList = document.getElementById('history-list');
@@ -80,7 +83,6 @@
 
         /**
          * Calculates the total score change for the current round inputs.
-         * This function is also exposed to the window for direct calls from UI changes.
          */
         function calculateRoundTotal() {
             let total = 0;
@@ -91,16 +93,17 @@
                 }
             });
             roundTotalChange.textContent = `總變動: ${total}`;
+            const confirmBtn = document.getElementById('confirm-round-btn');
             if (total === 0) {
                 roundTotalChange.classList.remove('text-red-400');
                 roundTotalChange.classList.add('text-green-400');
-                document.getElementById('confirm-round-btn').disabled = false;
-                document.getElementById('confirm-round-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+                confirmBtn.disabled = false;
+                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             } else {
                 roundTotalChange.classList.remove('text-green-400');
                 roundTotalChange.classList.add('text-red-400');
-                document.getElementById('confirm-round-btn').disabled = true;
-                document.getElementById('confirm-round-btn').classList.add('opacity-50', 'cursor-not-allowed');
+                confirmBtn.disabled = true;
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
             }
         }
 
@@ -120,19 +123,21 @@
                 }
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
-                auth = getAuth(app); // 確保在 app 初始化後立即獲取 auth 實例
+                auth = getAuth(app); 
 
-                // 執行身份驗證：優先使用環境提供的 Custom Token，否則使用匿名登入。
+                // 執行身份驗證
                 try {
                     if (initialAuthToken) {
                         await signInWithCustomToken(auth, initialAuthToken);
                         console.log("Signed in with Custom Token.");
                     } else {
+                        // 當在 Canvas 環境外 (例如 GitHub Pages) 運行時使用 Fallback Configs
                         await signInAnonymously(auth);
                         console.log("Signed in Anonymously (using fallback config).");
                     }
                 } catch (e) {
                     console.error("Firebase Sign-In Failed:", e);
+                    // 當在 GitHub Pages 失敗時，會顯示此錯誤。
                     alertMessage('錯誤: 無法建立用戶會話。請檢查 Firebase 專案設定。', 'red');
                 }
 
@@ -144,7 +149,6 @@
                         userIdDisplay.textContent = `使用者 ID (共享鍵): ${userId}`;
                         setupRealtimeListener();
                     } else {
-                        // 雖然我們已經在前面處理了登入，但保留此處用於監聽登出事件
                         console.log("User state changed to signed out.");
                     }
                 });
@@ -190,7 +194,10 @@
         async function saveGameState() {
             const gameRef = getGameDocRef();
             if (!gameRef || !userId) {
-                alertMessage('錯誤: 尚未完成身份驗證，無法儲存。', 'red');
+                // 如果是登入失敗 (例如 auth/configuration-not-found)，則不顯示此錯誤
+                if (auth.currentUser) {
+                    alertMessage('錯誤: 尚未完成身份驗證，無法儲存。', 'red');
+                }
                 return;
             }
 
@@ -215,7 +222,7 @@
         function renderUI() {
             renderScores();
             renderHistory();
-            renderPlayerSetupInputs();
+            // renderPlayerSetupInputs is called when modal opens
         }
 
         function renderScores() {
@@ -251,7 +258,7 @@
                         <!-- Minus Button: Ensures a large, easily tappable target -->
                         <button onclick="window.adjustChange(${player.id}, -${LOCAL_STEP})" 
                                 type="button" 
-                                class="w-1/4 h-12 bg-red-600 hover:bg-red-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
+                                class="w-1/4 h-12 bg-red-600 hover:bg-red-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95] active:bg-red-800">
                             -
                         </button>
                         <!-- Input Field to store/read value -->
@@ -260,7 +267,7 @@
                         <!-- Plus Button: Ensures a large, easily tappable target -->
                         <button onclick="window.adjustChange(${player.id}, ${LOCAL_STEP})" 
                                 type="button" 
-                                class="w-1/4 h-12 bg-green-600 hover:bg-green-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95]">
+                                class="w-1/4 h-12 bg-green-600 hover:bg-green-700 text-white font-bold text-xl transition duration-150 active:scale-[0.95] active:bg-green-800">
                             +
                         </button>
                     </div>
@@ -284,6 +291,7 @@
             // Display latest 10 rounds for brevity
             gameHistory.slice(0, 10).reverse().forEach((round, index) => {
                 const roundIndex = gameHistory.length - index;
+                // Add Chinese locale for date/time
                 const date = new Date(round.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 
                 const detail = round.changes.map(change => `
@@ -309,11 +317,10 @@
             });
         }
 
-        // --- Core Logic Functions (excluding calculateRoundTotal, which is above) ---
+        // --- Core Logic Functions ---
 
         function applyRoundScores() {
             const changes = [];
-            let isValid = true;
 
             // 1. Get changes and validate
             players.forEach(player => {
@@ -356,7 +363,7 @@
             let namesChanged = false;
             const newPlayers = players.map(player => {
                 const input = document.getElementById(`name-${player.id}`);
-                const newName = input.value.trim() || `玩家 ${player.id + 1}`;
+                const newName = input.value.trim() || DEFAULT_PLAYER_NAMES[player.id];
                 if (player.name !== newName) {
                     namesChanged = true;
                 }
@@ -371,7 +378,7 @@
             hideModal('setup-modal');
         }
 
-        // --- RESET LOGIC (UPDATED FOR SECURITY VERIFICATION) ---
+        // --- RESET LOGIC (UPDATED to reset names to default) ---
 
         // 1. Function to show the custom confirmation modal
         function resetGame() {
@@ -396,10 +403,10 @@
             }
 
             // Actual reset logic
-            players = players.map(p => ({ ...p, score: 0 }));
+            players = createDefaultPlayers(); // IMPORTANT: Reset to default names and scores
             gameHistory = [];
             saveGameState();
-            alertMessage('遊戲已重設。', 'green');
+            alertMessage('遊戲已重設 (名稱已重設為 A, B, C, D)。', 'green');
             hideModal('reset-confirm-modal'); // Hide modal after action
         }
         
@@ -466,6 +473,11 @@
 
     </script>
     <style>
+        /* ADDED: Fixes the mobile double-tap zoom/page enlargement issue when tapping buttons */
+        body {
+            /* Prevents double-tap to zoom on touch devices */
+            touch-action: manipulation;
+        }
         .modal-overlay {
             background-color: rgba(0, 0, 0, 0.75);
         }
